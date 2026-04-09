@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "760177477560",
+    "project_id": "habitron-dev",
+    "storage_bucket": "habitron-dev.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:760177477560:android:d6507650fe91b3c1fa714d",
+        "android_client_info": {
+          "package_name": "com.example.habit_tracker"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "760177477560-9qdrone8kh5t0167il4lqj5mv5mhjd2i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.habit_tracker",
+            "certificate_hash": "a1160112ea90d499452524d2f1e2e1aa3cd24298"
+          }
+        },
+        {
+          "client_id": "760177477560-a8uihu7lsou342va4c2lopq1d4flc3vd.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDyfeVRCNWoeDWCdBExUY0LcNpKjmgZj6A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "760177477560-a8uihu7lsou342va4c2lopq1d4flc3vd.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "760177477560-mkiakckhqvocahjq71e7c66ta4pt3irh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.habitTracker"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

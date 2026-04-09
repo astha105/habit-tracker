@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>760177477560-mkiakckhqvocahjq71e7c66ta4pt3irh.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.760177477560-mkiakckhqvocahjq71e7c66ta4pt3irh</string>
+	<key>API_KEY</key>
+	<string>AIzaSyAtS0WF_fv6QuZOtRYMa1OsO0fKsRSjPS0</string>
+	<key>GCM_SENDER_ID</key>
+	<string>760177477560</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.example.habitTracker</string>
+	<key>PROJECT_ID</key>
+	<string>habitron-dev</string>
+	<key>STORAGE_BUCKET</key>
+	<string>habitron-dev.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:760177477560:ios:db0f64a94e898850fa714d</string>
+</dict>
+</plist>
