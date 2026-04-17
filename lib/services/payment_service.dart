@@ -1,4 +1,5 @@
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:habit_tracker/config/app_config.dart';
 
 class PaymentService {
   final Razorpay _razorpay = Razorpay();
@@ -23,8 +24,8 @@ class PaymentService {
   }) {
     final options = {
       'key': 'rzp_test_YOUR_KEY_ID', // 🔑 paste your key here
-      'amount': 19900,               // ₹199 in paise
-      'name': 'HabitFlow',
+      'amount': AppConfig.priceInPaise,
+      'name': AppConfig.appName,
       'description': 'Track Progress — Pro Unlock',
       'prefill': {
         'contact': userPhone,

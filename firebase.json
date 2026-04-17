@@ -1,1 +1,48 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"habitron-dev","appId":"1:760177477560:android:d6507650fe91b3c1fa714d","fileOutput":"android/app/google-services.json"}},"ios":{"default":{"projectId":"habitron-dev","appId":"1:760177477560:ios:db0f64a94e898850fa714d","uploadDebugSymbols":false,"fileOutput":"ios/Runner/GoogleService-Info.plist"}},"macos":{"default":{"projectId":"habitron-dev","appId":"1:760177477560:ios:db0f64a94e898850fa714d","uploadDebugSymbols":false,"fileOutput":"macos/Runner/GoogleService-Info.plist"}},"dart":{"lib/firebase_options.dart":{"projectId":"habitron-dev","configurations":{"android":"1:760177477560:android:d6507650fe91b3c1fa714d","ios":"1:760177477560:ios:db0f64a94e898850fa714d","macos":"1:760177477560:ios:db0f64a94e898850fa714d","web":"1:760177477560:web:f8f9c7f96765a03bfa714d","windows":"1:760177477560:web:62b05c6c870839a1fa714d"}}}}}}
+{
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20"
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "habitron-dev",
+          "appId": "1:760177477560:android:d6507650fe91b3c1fa714d",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "habitron-dev",
+          "appId": "1:760177477560:ios:db0f64a94e898850fa714d",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "macos": {
+        "default": {
+          "projectId": "habitron-dev",
+          "appId": "1:760177477560:ios:db0f64a94e898850fa714d",
+          "uploadDebugSymbols": false,
+          "fileOutput": "macos/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "habitron-dev",
+          "configurations": {
+            "android": "1:760177477560:android:d6507650fe91b3c1fa714d",
+            "ios": "1:760177477560:ios:db0f64a94e898850fa714d",
+            "macos": "1:760177477560:ios:db0f64a94e898850fa714d",
+            "web": "1:760177477560:web:f8f9c7f96765a03bfa714d",
+            "windows": "1:760177477560:web:62b05c6c870839a1fa714d"
+          }
+        }
+      }
+    }
+  }
+}

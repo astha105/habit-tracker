@@ -1,9 +1,17 @@
-// ignore_for_file: deprecated_member_use, unused_element, unused_field, avoid_print
+// ignore_for_file: deprecated_member_use, unused_field, avoid_print, use_build_context_synchronously, use_key_in_widget_constructors
 
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:habit_tracker/theme/app_tokens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:habit_tracker/config/category_config.dart';
+import 'package:habit_tracker/services/firestore_service.dart';
+import 'package:habit_tracker/services/notification_service.dart';
+import 'package:habit_tracker/services/widget_service.dart';
+import 'package:habit_tracker/services/smart_reminder_service.dart';
+import 'package:habit_tracker/screens/templates_screen.dart';
+import 'package:habit_tracker/services/habit_stack_service.dart';
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 enum CompletionTrackingMode { stepByStep, customValue }
@@ -31,6 +39,7 @@ class Goal {
   int completionsTodayCount;
   TimeOfDay? reminderTime;
   List<TimeOfDay> reminders;
+  String? stackedAfter; // habit stacking: title of the trigger habit
 
   Goal({
     required this.title,
@@ -52,6 +61,7 @@ class Goal {
     this.completionsTodayCount = 0,
     this.reminderTime,
     List<TimeOfDay>? reminders,
+    this.stackedAfter,
   })  : completionHistory = completionHistory ?? [],
         reminders = reminders ?? [];
 
@@ -119,10 +129,27 @@ class GoalsStorageService {
       final prefs = await SharedPreferences.getInstance();
       final jsonStr = prefs.getString(_key);
       if (jsonStr == null) return [];
-      
+
       final jsonList = jsonDecode(jsonStr) as List;
       final goals = jsonList.map((json) => _goalFromJson(json)).toList();
       print('✓ Goals loaded (${goals.length} goals)');
+
+      // Auto-advance any goal that hasn't been logged today
+      bool changed = false;
+      final now = DateTime.now();
+      for (final goal in goals) {
+        if (!goal.loggedToday && !goal.isCompleted) {
+          if (goal.completionsPerDayEnabled) {
+            goal.completionsTodayCount = goal.completionsPerDay;
+          }
+          goal.currentDays++;
+          goal.completionHistory.add(now);
+          goal.lastLoggedDate = now;
+          changed = true;
+        }
+      }
+      if (changed) await saveGoals(goals);
+
       return goals;
     } catch (e) {
       print('✗ Error loading goals: $e');
@@ -149,6 +176,7 @@ class GoalsStorageService {
     'completionsPerDay': g.completionsPerDay,
     'completionsTodayCount': g.completionsTodayCount,
     'reminders': g.reminders.map((t) => '${t.hour}:${t.minute}').toList(),
+    'stackedAfter': g.stackedAfter,
   };
 
   static Goal _goalFromJson(Map<String, dynamic> json) {
@@ -189,75 +217,16 @@ class GoalsStorageService {
       completionsPerDay: json['completionsPerDay'] as int? ?? 1,
       completionsTodayCount: json['completionsTodayCount'] as int? ?? 0,
       reminders: reminders,
+      stackedAfter: json['stackedAfter'] as String?,
     );
   }
 }
 
-// ─── Design Tokens (mirrors landing screen _T) ────────────────────────────────
-class _T {
-  _T._();
-  static const Color ink      = Color(0xFF0D0D0D);
-  static const Color ink2     = Color(0xFF5C5C5C);
-  static const Color ink3     = Color(0xFFA3A3A3);
-  static const Color surface  = Color(0xFFFFFFFF);
-  static const Color canvas   = Color(0xFFFAFAF8);
-  static const Color border   = Color(0xFFE6E5E0);
-
-  static const Color purple       = Color(0xFF7C6FD8);
-  static const Color purpleDark   = Color(0xFF534AB7);
-  static const Color purpleDeep   = Color(0xFF3C3489);
-  static const Color purpleBg     = Color(0xFFF0EDFE);
-  static const Color purpleBorder = Color(0xFFC8C0F8);
-
-  static const Color coral       = Color(0xFFD85A30);
-  static const Color coralDark   = Color(0xFF993C1D);
-  static const Color coralBg     = Color(0xFFFEF0E8);
-  static const Color coralBorder = Color(0xFFF5C4B3);
-
-  static const Color teal       = Color(0xFF1D9E75);
-  static const Color tealDark   = Color(0xFF0F6E56);
-  static const Color tealBg     = Color(0xFFEBF8F2);
-  static const Color tealBorder = Color(0xFF9FE1CB);
-
-  static const Color blue       = Color(0xFF378ADD);
-  static const Color blueDark   = Color(0xFF185FA5);
-  static const Color blueBg     = Color(0xFFEBF3FD);
-  static const Color blueBorder = Color(0xFFB5D4F4);
-
-  static const Color amber       = Color(0xFFBA7517);
-  static const Color amberBg     = Color(0xFFFEF5E7);
-  static const Color amberBorder = Color(0xFFFAC775);
-
-  static const double s4  = 4;
-  static const double s8  = 8;
-  static const double s12 = 12;
-  static const double s16 = 16;
-  static const double s20 = 20;
-  static const double s24 = 24;
-  static const double s32 = 32;
-  static const double s40 = 40;
-  static const double s64 = 64;
-
-  static const double r8   = 8;
-  static const double r12  = 12;
-  static const double r16  = 16;
-  static const double r100 = 100;
-
-  static TextStyle heading({double size = 24, double spacing = -1.0}) =>
-      TextStyle(fontSize: size, fontWeight: FontWeight.w500, color: ink,
-          height: 1.1, letterSpacing: spacing);
-
-  static TextStyle body({double size = 14, Color? color}) =>
-      TextStyle(fontSize: size, color: color ?? ink2, height: 1.6, letterSpacing: -0.1);
-
-  static TextStyle label({double size = 11, Color? color}) =>
-      TextStyle(fontSize: size, fontWeight: FontWeight.w500,
-          color: color ?? ink3, letterSpacing: 0.06 * size);
-}
 
 // ─── Goals Screen ─────────────────────────────────────────────────────────────
 class GoalsScreen extends StatefulWidget {
-  const GoalsScreen({super.key});
+  final VoidCallback? onBack;
+  const GoalsScreen({super.key, this.onBack});
   @override
   State<GoalsScreen> createState() => _GoalsScreenState();
 }
@@ -265,6 +234,7 @@ class GoalsScreen extends StatefulWidget {
 class _GoalsScreenState extends State<GoalsScreen> {
   final List<Goal> _goals = [];
   bool _isLoading = true;
+  String _selectedCategory = 'All';
 
   @override
   void initState() {
@@ -274,8 +244,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
 
   Future<void> _loadGoals() async {
     try {
-      await Future.delayed(const Duration(milliseconds: 500));
-      final loaded = await GoalsStorageService.loadGoals();
+      final loaded = await FirestoreService().loadHabits();
       if (mounted) {
         setState(() {
           _goals.addAll(loaded);
@@ -290,28 +259,55 @@ class _GoalsScreenState extends State<GoalsScreen> {
     }
   }
 
+  void _openStackSuggestions() {
+    if (_goals.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add some habits first to get stack suggestions.')),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _HabitStackSheet(
+        goals: _goals,
+        onApply: (habitTitle, anchor) {
+          final goal = _goals.firstWhere((g) => g.title == habitTitle);
+          setState(() => goal.stackedAfter = anchor);
+          _saveGoals();
+        },
+      ),
+    );
+  }
+
   Future<void> _saveGoals() async {
-    await GoalsStorageService.saveGoals(_goals);
+    await FirestoreService().saveAllHabits(_goals);
+    await FirestoreService().updateStats(_goals);
+    NotificationService.rescheduleAll(_goals);
+    WidgetService.update(_goals);
   }
 
   void _deleteGoal(Goal goal) {
     final index = _goals.indexOf(goal);
     setState(() => _goals.remove(goal));
-    _saveGoals();
+    FirestoreService().deleteHabit(goal.title);
+    FirestoreService().updateStats(_goals);
     Future.delayed(const Duration(milliseconds: 300), () {
+      final t = AppTokens.of(context);
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 3),
           content: Text('"${goal.title}" deleted',
-              style: _T.body(color: Colors.white)),
-          backgroundColor: _T.ink,
+              style: t.body(color: Colors.white)),
+          backgroundColor: t.bg2,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_T.r8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.r8)),
           action: SnackBarAction(
             label: 'Undo',
-            textColor: _T.purple,
+            textColor: t.accent,
             onPressed: () {
               setState(() => _goals.insert(index, goal));
               _saveGoals();
@@ -347,12 +343,25 @@ class _GoalsScreenState extends State<GoalsScreen> {
     );
   }
 
+  Future<void> _openTemplates() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TemplatesScreen(
+          onImport: (newGoals) {
+            setState(() => _goals.addAll(newGoals));
+            _saveGoals();
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _openAdd() async {
     final newGoal = await showModalBottomSheet<Goal>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const GoalSheet(),
+      builder: (_) => GoalSheet(allGoals: _goals),
     );
     if (newGoal != null) {
       setState(() => _goals.add(newGoal));
@@ -365,7 +374,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => GoalSheet(existing: goal),
+      builder: (_) => GoalSheet(existing: goal, allGoals: _goals),
     );
     if (updated != null) {
       setState(() {
@@ -383,6 +392,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
         goal.reminders = updated.reminders;
         goal.useEmoji = updated.useEmoji;
         goal.selectedEmoji = updated.selectedEmoji;
+        goal.stackedAfter = updated.stackedAfter;
       });
       _saveGoals();
     }
@@ -437,9 +447,10 @@ class _GoalsScreenState extends State<GoalsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     if (_isLoading) {
       return Scaffold(
-        backgroundColor: _T.canvas,
+        backgroundColor: t.bg,
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -447,52 +458,73 @@ class _GoalsScreenState extends State<GoalsScreen> {
               Container(
                 width: 60, height: 60,
                 decoration: BoxDecoration(
-                  color: _T.purpleBg,
-                  borderRadius: BorderRadius.circular(_T.r16),
-                  border: Border.all(color: _T.purpleBorder),
+                  color: AppTokens.purple.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(AppTokens.r16),
+                  border: Border.all(color: t.border),
                 ),
-                child: const Icon(Icons.flag_outlined, color: _T.purple, size: 28),
+                child: const Icon(Icons.flag_outlined, color: AppTokens.purple, size: 28),
               ),
-              const SizedBox(height: _T.s16),
-              Text('Loading goals...', style: _T.body(size: 14)),
+              const SizedBox(height: AppTokens.s16),
+              Text('Loading goals...', style: t.body(size: 14)),
             ],
           ),
         ),
       );
     }
 
-    final active    = _goals.where((g) => !g.isCompleted).toList();
-    final completed = _goals.where((g) => g.isCompleted).toList();
+    final filtered  = _selectedCategory == 'All'
+        ? _goals
+        : _goals.where((g) => g.category == _selectedCategory).toList();
+    final active    = filtered.where((g) => !g.isCompleted).toList();
+    final completed = filtered.where((g) => g.isCompleted).toList();
 
     return Scaffold(
-      backgroundColor: _T.canvas,
+      backgroundColor: t.bg,
       appBar: AppBar(
-        backgroundColor: _T.surface,
+        backgroundColor: t.bg,
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: _T.ink, size: 18),
-          onPressed: () => Navigator.of(context).maybePop(),
+          icon: Icon(Icons.arrow_back_ios, color: t.txt, size: 18),
+          onPressed: () {
+            if (widget.onBack != null) {
+              widget.onBack!();
+            } else {
+              Navigator.of(context).maybePop();
+            }
+          },
         ),
         centerTitle: true,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             _LogoMark(size: 22),
-            const SizedBox(width: _T.s8),
+            const SizedBox(width: AppTokens.s8),
             Text('Goals',
                 style: TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: _T.ink,
+                    fontWeight: FontWeight.w700,
+                    color: t.txt,
                     letterSpacing: -0.4)),
           ],
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, thickness: 1, color: _T.border),
+          child: Divider(height: 1, thickness: 1, color: t.border),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.auto_awesome_rounded, size: 20),
+            color: const Color(0xFF8B7FFF),
+            tooltip: 'Browse Templates',
+            onPressed: _openTemplates,
+          ),
+          IconButton(
+            icon: const Icon(Icons.link_rounded, size: 20),
+            color: const Color(0xFF8B7FFF),
+            tooltip: 'Suggest Habit Stacks',
+            onPressed: _openStackSuggestions,
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: _AddBtn(onTap: _openAdd),
@@ -504,6 +536,7 @@ class _GoalsScreenState extends State<GoalsScreen> {
   }
 
   Widget _buildEmpty() {
+    final t = AppTokens.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
@@ -513,22 +546,28 @@ class _GoalsScreenState extends State<GoalsScreen> {
             Container(
               width: 72, height: 72,
               decoration: BoxDecoration(
-                color: _T.purpleBg,
-                borderRadius: BorderRadius.circular(_T.r16),
-                border: Border.all(color: _T.purpleBorder),
+                color: AppTokens.purple.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(AppTokens.r16),
+                border: Border.all(color: t.border),
               ),
-              child: const Icon(Icons.flag_outlined, color: _T.purple, size: 32),
+              child: const Icon(Icons.flag_outlined, color: AppTokens.purple, size: 32),
             ),
-            const SizedBox(height: _T.s20),
-            Text('No goals yet', style: _T.heading(size: 22)),
-            const SizedBox(height: _T.s8),
+            const SizedBox(height: AppTokens.s20),
+            Text('No goals yet', style: t.heading(size: 22)),
+            const SizedBox(height: AppTokens.s8),
             Text(
               'Tap "Add" to create your first goal and start making progress.',
               textAlign: TextAlign.center,
-              style: _T.body(size: 14),
+              style: t.body(size: 14),
             ),
-            const SizedBox(height: _T.s32),
+            const SizedBox(height: AppTokens.s32),
             _PrimaryBtn(label: 'Add your first goal', onTap: _openAdd),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: _openTemplates,
+              icon: const Icon(Icons.auto_awesome_rounded, size: 16, color: Color(0xFF8B7FFF)),
+              label: const Text('Browse Templates', style: TextStyle(color: Color(0xFF8B7FFF), fontWeight: FontWeight.w600)),
+            ),
           ],
         ),
       ),
@@ -536,17 +575,70 @@ class _GoalsScreenState extends State<GoalsScreen> {
   }
 
   Widget _buildList(List<Goal> active, List<Goal> completed) {
+    final t = AppTokens.of(context);
+    // Collect categories present in goals
+    final presentCats = {'All', ..._goals.map((g) => g.category)};
+    final filterCats = ['All', ...CategoryConfig.all.map((c) => c.name).where((n) => presentCats.contains(n))];
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _SummaryStrip(active: active.length, completed: completed.length),
-          Divider(height: 1, thickness: 1, color: _T.border),
+          Divider(height: 1, thickness: 1, color: t.border),
+          // ── Category filter bar ──────────────────────────────────────────
+          SizedBox(
+            height: 52,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              itemCount: filterCats.length,
+              separatorBuilder: (context, i) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final cat = filterCats[i];
+                final isAll = cat == 'All';
+                final isSelected = _selectedCategory == cat;
+                final meta = isAll ? null : CategoryConfig.forName(cat);
+                final catColor = meta?.color ?? t.accent;
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedCategory = cat),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isSelected ? catColor.withOpacity(0.15) : t.bg2,
+                      borderRadius: BorderRadius.circular(100),
+                      border: Border.all(
+                        color: isSelected ? catColor : t.border,
+                        width: isSelected ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!isAll)
+                          Icon(meta!.icon, size: 13, color: isSelected ? catColor : t.txt3),
+                        if (!isAll) const SizedBox(width: 5),
+                        Text(cat,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                              color: isSelected ? catColor : t.txt2,
+                              letterSpacing: -0.2,
+                            )),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Divider(height: 1, thickness: 1, color: t.border),
 
           if (active.isNotEmpty) ...[
-            _SectionHeader(label: 'In Progress', pill: true),
+            _SectionHeader(label: 'In Progress', accent: AppTokens.purple),
             if (active.isNotEmpty)
-              _TopGoalCard(
+              AppTokensopGoalCard(
                 goal: active.first,
                 onEdit: () => _openEdit(active.first),
                 onDelete: () => _confirmDelete(active.first),
@@ -566,8 +658,8 @@ class _GoalsScreenState extends State<GoalsScreen> {
           ],
 
           if (completed.isNotEmpty) ...[
-            Divider(height: 1, thickness: 1, color: _T.border),
-            _SectionHeader(label: 'Completed', pill: false, completed: true),
+            Divider(height: 1, thickness: 1, color: t.border),
+            _SectionHeader(label: 'Completed', accent: AppTokens.teal),
             ...completed.map((g) => _SwipeCard(
               key: ValueKey(g.hashCode),
               goal: g,
@@ -584,15 +676,16 @@ class _GoalsScreenState extends State<GoalsScreen> {
   }
 }
 
-// ─── Summary Strip (mirrors landing _StatsStrip) ──────────────────────────────
+// ─── Summary Strip ────────────────────────────────────────────────────────────
 class _SummaryStrip extends StatelessWidget {
   final int active, completed;
   const _SummaryStrip({required this.active, required this.completed});
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     return Container(
-      color: _T.surface,
+      color: t.bg2,
       child: IntrinsicHeight(
         child: Row(
           children: [
@@ -600,20 +693,14 @@ class _SummaryStrip extends StatelessWidget {
               icon: Icons.radio_button_checked_outlined,
               value: '$active',
               label: 'Active',
-              iconBg: _T.purpleBg,
-              iconColor: _T.purple,
-              valueColor: _T.purpleDeep,
-              labelColor: _T.purple,
+              iconColor: AppTokens.purple,
             )),
-            VerticalDivider(width: 1, thickness: 1, color: _T.border),
+            VerticalDivider(width: 1, thickness: 1, color: t.border),
             Expanded(child: _SummaryCell(
               icon: Icons.emoji_events_outlined,
               value: '$completed',
               label: 'Completed',
-              iconBg: _T.tealBg,
-              iconColor: _T.teal,
-              valueColor: _T.tealDark,
-              labelColor: _T.teal,
+              iconColor: AppTokens.teal,
             )),
           ],
         ),
@@ -625,15 +712,15 @@ class _SummaryStrip extends StatelessWidget {
 class _SummaryCell extends StatelessWidget {
   final IconData icon;
   final String value, label;
-  final Color iconBg, iconColor, valueColor, labelColor;
+  final Color iconColor;
   const _SummaryCell({
     required this.icon, required this.value, required this.label,
-    required this.iconBg, required this.iconColor,
-    required this.valueColor, required this.labelColor,
+    required this.iconColor,
   });
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: Column(
@@ -643,18 +730,20 @@ class _SummaryCell extends StatelessWidget {
           Container(
             width: 38, height: 38,
             decoration: BoxDecoration(
-                color: iconBg, borderRadius: BorderRadius.circular(_T.r8)),
+                color: iconColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(AppTokens.r8),
+                border: Border.all(color: iconColor.withOpacity(0.25))),
             child: Icon(icon, size: 17, color: iconColor),
           ),
-          const SizedBox(height: _T.s12),
+          const SizedBox(height: AppTokens.s12),
           Text(value,
               style: TextStyle(
                   fontSize: 28,
-                  fontWeight: FontWeight.w500,
-                  color: valueColor,
+                  fontWeight: FontWeight.w700,
+                  color: t.txt,
                   letterSpacing: -1.2)),
           const SizedBox(height: 3),
-          Text(label, style: _T.label(size: 11, color: labelColor)),
+          Text(label, style: t.label(size: 11, color: iconColor)),
         ],
       ),
     );
@@ -664,30 +753,22 @@ class _SummaryCell extends StatelessWidget {
 // ─── Section Header ────────────────────────────────────────────────────────────
 class _SectionHeader extends StatelessWidget {
   final String label;
-  final bool pill;
-  final bool completed;
-  const _SectionHeader({required this.label, this.pill = false, this.completed = false});
+  final Color accent;
+  const _SectionHeader({required this.label, required this.accent});
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     return Container(
-      color: _T.canvas,
+      color: t.bg,
       padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
-      child: pill
-          ? _EyebrowPill(
-              label: label.toUpperCase(),
-              bg: _T.purpleBg,
-              border: _T.purpleBorder,
-              dot: _T.purple,
-              text: _T.purpleDark,
-            )
-          : _EyebrowPill(
-              label: label.toUpperCase(),
-              bg: _T.tealBg,
-              border: _T.tealBorder,
-              dot: _T.teal,
-              text: _T.tealDark,
-            ),
+      child: _EyebrowPill(
+        label: label.toUpperCase(),
+        bg: accent.withOpacity(0.1),
+        border: accent.withOpacity(0.25),
+        dot: accent,
+        text: accent,
+      ),
     );
   }
 }
@@ -712,10 +793,10 @@ class _SwipeCard extends StatelessWidget {
     return Dismissible(
       key: ValueKey('dismiss_${goal.hashCode}'),
       background: _SwipeBg(
-          color: _T.blue, icon: Icons.edit_outlined,
+          color: AppTokens.blue, icon: Icons.edit_outlined,
           label: 'Edit', alignment: Alignment.centerLeft),
       secondaryBackground: _SwipeBg(
-          color: _T.coral, icon: Icons.delete_outline,
+          color: AppTokens.coral, icon: Icons.delete_outline,
           label: 'Delete', alignment: Alignment.centerRight),
       confirmDismiss: (dir) async {
         if (dir == DismissDirection.startToEnd) {
@@ -742,10 +823,11 @@ class _SwipeBg extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final isLeft = alignment == Alignment.centerLeft;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(_T.r12)),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(AppTokens.r12)),
       alignment: alignment,
       padding: EdgeInsets.only(left: isLeft ? 20 : 0, right: isLeft ? 0 : 20),
       child: Column(
@@ -753,7 +835,7 @@ class _SwipeBg extends StatelessWidget {
         children: [
           Icon(icon, color: Colors.white, size: 20),
           const SizedBox(height: 4),
-          Text(label, style: _T.label(size: 11, color: Colors.white)),
+          Text(label, style: t.label(size: 11, color: Colors.white)),
         ],
       ),
     );
@@ -761,12 +843,12 @@ class _SwipeBg extends StatelessWidget {
 }
 
 // ─── Top Goal Hero Card ────────────────────────────────────────────────────────
-class _TopGoalCard extends StatelessWidget {
+class AppTokensopGoalCard extends StatelessWidget {
   final Goal goal;
   final VoidCallback? onLogDay;
   final VoidCallback onEdit, onDelete, onLongPress;
 
-  const _TopGoalCard({
+  const AppTokensopGoalCard({
     required this.goal,
     required this.onLogDay,
     required this.onEdit,
@@ -776,6 +858,7 @@ class _TopGoalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final progress = (goal.currentDays / goal.targetDays).clamp(0.0, 1.0);
     final pct = (progress * 100).toStringAsFixed(0);
 
@@ -794,8 +877,13 @@ class _TopGoalCard extends StatelessWidget {
         onLongPress: onLongPress,
         child: Container(
           decoration: BoxDecoration(
-            color: _T.ink,
-            borderRadius: BorderRadius.circular(_T.r16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [goal.color.withOpacity(0.15), t.bg2],
+            ),
+            borderRadius: BorderRadius.circular(AppTokens.r16),
+            border: Border.all(color: goal.color.withOpacity(0.25)),
           ),
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -806,38 +894,44 @@ class _TopGoalCard extends StatelessWidget {
                   Container(
                     width: 48, height: 48,
                     decoration: BoxDecoration(
-                        color: goal.color.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(_T.r8),
+                        color: goal.color.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(AppTokens.r8),
                         border: Border.all(color: goal.color.withOpacity(0.4))),
                     child: goal.useEmoji
                         ? Center(child: Text(goal.selectedEmoji, style: const TextStyle(fontSize: 24)))
                         : Icon(goal.icon, color: goal.color, size: 22),
                   ),
-                  const SizedBox(width: _T.s12),
+                  const SizedBox(width: AppTokens.s12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(goal.title,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                color: _T.surface,
+                                fontWeight: FontWeight.w700,
+                                color: t.txt,
                                 letterSpacing: -0.4)),
                         const SizedBox(height: 3),
                         Row(children: [
+                          Icon(
+                            CategoryConfig.forName(goal.category).icon,
+                            size: 11,
+                            color: CategoryConfig.forName(goal.category).color,
+                          ),
+                          const SizedBox(width: 4),
                           Text(goal.category,
-                              style: _T.label(size: 11, color: const Color(0xFF888888))),
+                              style: t.label(size: 11, color: t.txt3)),
                           if (goal.streakGoal != null) ...[
                             const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                  color: _T.coralBg.withOpacity(0.15),
+                                  color: AppTokens.coral.withOpacity(0.15),
                                   borderRadius: BorderRadius.circular(100),
-                                  border: Border.all(color: _T.coral.withOpacity(0.3))),
+                                  border: Border.all(color: AppTokens.coral.withOpacity(0.3))),
                               child: Text('🔥 ${goal.currentStreak}d',
-                                  style: _T.label(size: 10, color: _T.coral)),
+                                  style: t.label(size: 10, color: AppTokens.coral)),
                             ),
                           ],
                         ]),
@@ -845,18 +939,18 @@ class _TopGoalCard extends StatelessWidget {
                     ),
                   ),
                   _IconActionBtn(icon: Icons.edit_outlined, onTap: onEdit),
-                  const SizedBox(width: _T.s8),
+                  const SizedBox(width: AppTokens.s8),
                   _IconActionBtn(icon: Icons.delete_outline, onTap: onDelete),
                 ],
               ),
 
-              const SizedBox(height: _T.s24),
+              const SizedBox(height: AppTokens.s24),
 
               Row(children: [
                 _HeroBadge(value: '${goal.currentDays}d', sub: 'done'),
-                const SizedBox(width: _T.s8),
+                const SizedBox(width: AppTokens.s8),
                 _HeroBadge(value: '${goal.targetDays}d', sub: 'target'),
-                const SizedBox(width: _T.s8),
+                const SizedBox(width: AppTokens.s8),
                 _HeroBadge(value: '${goal.targetDays - goal.currentDays}d', sub: 'left'),
                 const Spacer(),
                 Column(
@@ -865,23 +959,23 @@ class _TopGoalCard extends StatelessWidget {
                     Text('$pct%',
                         style: TextStyle(
                             fontSize: 32,
-                            fontWeight: FontWeight.w500,
+                            fontWeight: FontWeight.w700,
                             color: goal.color,
                             letterSpacing: -1.5)),
                     Text('complete',
-                        style: _T.label(size: 10, color: const Color(0xFF888888))),
+                        style: t.label(size: 10, color: t.txt3)),
                   ],
                 ),
               ]),
 
-              const SizedBox(height: _T.s16),
+              const SizedBox(height: AppTokens.s16),
 
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
                   value: progress,
                   minHeight: 4,
-                  backgroundColor: const Color(0xFF2A2A2A),
+                  backgroundColor: t.bg3,
                   valueColor: AlwaysStoppedAnimation(goal.color),
                 ),
               ),
@@ -893,13 +987,13 @@ class _TopGoalCard extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: (goal.completionsTodayCount / goal.completionsPerDay).clamp(0.0, 1.0),
                     minHeight: 3,
-                    backgroundColor: const Color(0xFF2A2A2A),
+                    backgroundColor: t.bg3,
                     valueColor: AlwaysStoppedAnimation(goal.color.withOpacity(0.6)),
                   ),
                 ),
               ],
 
-              const SizedBox(height: _T.s16),
+              const SizedBox(height: AppTokens.s16),
 
               GestureDetector(
                 onTap: onLogDay,
@@ -908,9 +1002,9 @@ class _TopGoalCard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   decoration: BoxDecoration(
                     color: goal.dailyTargetMet
-                        ? const Color(0xFF2A2A2A)
+                        ? t.bg3
                         : goal.color,
-                    borderRadius: BorderRadius.circular(_T.r8),
+                    borderRadius: BorderRadius.circular(AppTokens.r8),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -920,16 +1014,16 @@ class _TopGoalCard extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w700,
                           letterSpacing: -0.2,
                           color: goal.dailyTargetMet
-                              ? const Color(0xFF555555)
-                              : Colors.white,
+                              ? t.txt3
+                              : Colors.black,
                         ),
                       ),
                       if (!goal.dailyTargetMet) ...[
-                        const SizedBox(width: _T.s8),
-                        const Icon(Icons.arrow_forward, size: 12, color: Colors.white),
+                        const SizedBox(width: AppTokens.s8),
+                        const Icon(Icons.arrow_forward, size: 12, color: Colors.black),
                       ],
                     ],
                   ),
@@ -948,19 +1042,23 @@ class _HeroBadge extends StatelessWidget {
   const _HeroBadge({required this.value, required this.sub});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E),
-            borderRadius: BorderRadius.circular(_T.r8)),
+            color: t.bg3,
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            border: Border.all(color: t.border)),
         child: Column(children: [
           Text(value,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w500, color: _T.surface)),
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w700, color: t.txt)),
           const SizedBox(height: 2),
-          Text(sub, style: _T.label(size: 9, color: const Color(0xFF666666))),
+          Text(sub, style: t.label(size: 9, color: t.txt3)),
         ]),
       );
+  }
 }
 
 class _IconActionBtn extends StatelessWidget {
@@ -969,19 +1067,23 @@ class _IconActionBtn extends StatelessWidget {
   const _IconActionBtn({required this.icon, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(_T.r8)),
-          child: Icon(icon, color: const Color(0xFF888888), size: 15),
+              color: t.bg3,
+              borderRadius: BorderRadius.circular(AppTokens.r8),
+              border: Border.all(color: t.border)),
+          child: Icon(icon, color: t.txt2, size: 15),
         ),
       );
+  }
 }
 
-// ─── Regular Goal Card (matches landing _FeatureCard feel) ────────────────────
+// ─── Regular Goal Card ─────────────────────────────────────────────────────────
 class _GoalCard extends StatefulWidget {
   final Goal goal;
   final VoidCallback? onLogDay;
@@ -996,6 +1098,7 @@ class _GoalCardState extends State<_GoalCard> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final goal = widget.goal;
     final progress = (goal.currentDays / goal.targetDays).clamp(0.0, 1.0);
     final pct = (progress * 100).toStringAsFixed(0);
@@ -1017,9 +1120,9 @@ class _GoalCardState extends State<_GoalCard> {
         duration: const Duration(milliseconds: 180),
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         decoration: BoxDecoration(
-          color: _hovered ? const Color(0xFFF5F4F1) : _T.surface,
-          borderRadius: BorderRadius.circular(_T.r12),
-          border: Border.all(color: _T.border),
+          color: _hovered ? t.bg3 : t.bg2,
+          borderRadius: BorderRadius.circular(AppTokens.r12),
+          border: Border.all(color: _hovered ? goal.color.withOpacity(0.4) : t.border),
         ),
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -1030,14 +1133,14 @@ class _GoalCardState extends State<_GoalCard> {
               width: 40, height: 40,
               decoration: BoxDecoration(
                 color: _hovered ? goal.color : goal.color.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(_T.r8),
+                borderRadius: BorderRadius.circular(AppTokens.r8),
               ),
               child: goal.useEmoji
                   ? Center(child: Text(goal.selectedEmoji, style: const TextStyle(fontSize: 20)))
                   : Icon(goal.icon,
                       color: _hovered ? Colors.white : goal.color, size: 20),
             ),
-            const SizedBox(width: _T.s12),
+            const SizedBox(width: AppTokens.s12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1045,43 +1148,54 @@ class _GoalCardState extends State<_GoalCard> {
                   Row(children: [
                     Expanded(
                       child: Text(goal.title,
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: _T.ink,
+                              fontWeight: FontWeight.w700,
+                              color: t.txt,
                               letterSpacing: -0.3)),
                     ),
                     if (goal.streakGoal != null)
                       Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: Text('🔥 ${goal.currentStreak}',
-                            style: _T.label(size: 11, color: _T.coral)),
+                            style: t.label(size: 11, color: AppTokens.coral)),
                       ),
                     Text('$pct%',
                         style: TextStyle(
                             fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                            fontWeight: FontWeight.w700,
                             color: goal.color,
                             letterSpacing: -0.2)),
                   ]),
                   const SizedBox(height: 3),
-                  Text(goal.description, style: _T.body(size: 12)),
-                  const SizedBox(height: _T.s12),
+                  Text(goal.description, style: t.body(size: 12)),
+                  if (goal.stackedAfter != null) ...[
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        Icon(Icons.link_rounded, size: 11, color: AppTokens.purple),
+                        const SizedBox(width: 3),
+                        Text('After: ${goal.stackedAfter}',
+                            style: TextStyle(fontSize: 10, color: AppTokens.purple, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: AppTokens.s12),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(3),
                     child: LinearProgressIndicator(
                       value: progress,
                       minHeight: 3,
-                      backgroundColor: _T.border,
+                      backgroundColor: t.bg3,
                       valueColor: AlwaysStoppedAnimation(goal.color),
                     ),
                   ),
-                  const SizedBox(height: _T.s8),
+                  const SizedBox(height: AppTokens.s8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text('${goal.currentDays} / ${goal.targetDays} days',
-                          style: _T.label(size: 11)),
+                          style: t.label(size: 11)),
                       if (tappable)
                         GestureDetector(
                           onTap: goal.dailyTargetMet ? null : widget.onLogDay,
@@ -1089,29 +1203,29 @@ class _GoalCardState extends State<_GoalCard> {
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: goal.dailyTargetMet
-                                  ? _T.canvas
-                                  : goal.color.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(_T.r100),
+                                  ? t.bg3
+                                  : goal.color.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(AppTokens.r100),
                               border: Border.all(
-                                color: goal.dailyTargetMet ? _T.border : goal.color.withOpacity(0.3),
+                                color: goal.dailyTargetMet ? t.border : goal.color.withOpacity(0.3),
                               ),
                             ),
                             child: Text(logLabel,
-                                style: _T.label(
+                                style: t.label(
                                     size: 10,
-                                    color: goal.dailyTargetMet ? _T.ink3 : goal.color)),
+                                    color: goal.dailyTargetMet ? t.txt3 : goal.color)),
                           ),
                         )
                       else
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: _T.tealBg,
-                            borderRadius: BorderRadius.circular(_T.r100),
-                            border: Border.all(color: _T.tealBorder),
+                            color: AppTokens.teal.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(AppTokens.r100),
+                            border: Border.all(color: AppTokens.teal.withOpacity(0.3)),
                           ),
                           child: Text('✓ Done',
-                              style: _T.label(size: 10, color: _T.teal)),
+                              style: t.label(size: 10, color: AppTokens.teal)),
                         ),
                     ],
                   ),
@@ -1125,24 +1239,27 @@ class _GoalCardState extends State<_GoalCard> {
   }
 }
 
-// ─── Primitives (matching landing screen) ─────────────────────────────────────
+// ─── Primitives ─────────────────────────────────────────────────────────────────
 class _LogoMark extends StatelessWidget {
   final double size;
   const _LogoMark({required this.size});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
         width: size, height: size,
         decoration: BoxDecoration(
-            color: _T.ink,
+            color: t.accent,
             borderRadius: BorderRadius.circular(size * 0.22)),
         child: Center(
           child: Container(
             width: size * 0.30, height: size * 0.30,
-            decoration: const BoxDecoration(color: _T.surface, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: t.bg, shape: BoxShape.circle),
           ),
         ),
       );
+  }
 }
 
 class _EyebrowPill extends StatelessWidget {
@@ -1162,7 +1279,7 @@ class _EyebrowPill extends StatelessWidget {
         decoration: BoxDecoration(
             color: bg,
             border: Border.all(color: border),
-            borderRadius: BorderRadius.circular(_T.r100)),
+            borderRadius: BorderRadius.circular(AppTokens.r100)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Container(
               width: 6, height: 6,
@@ -1171,7 +1288,7 @@ class _EyebrowPill extends StatelessWidget {
           Text(label,
               style: TextStyle(
                   fontSize: 10,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w700,
                   color: text,
                   letterSpacing: 0.6)),
         ]),
@@ -1190,7 +1307,9 @@ class _AddBtnState extends State<_AddBtn> {
   bool _pressed = false;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) {
           setState(() => _pressed = false);
@@ -1203,13 +1322,14 @@ class _AddBtnState extends State<_AddBtn> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
             decoration: BoxDecoration(
-                color: _T.ink,
-                borderRadius: BorderRadius.circular(_T.r8)),
+                color: t.accent,
+                borderRadius: BorderRadius.circular(AppTokens.r8)),
             child: Text('Add',
-                style: _T.label(size: 12, color: _T.surface)),
+                style: t.label(size: 12, color: t.bg)),
           ),
         ),
       );
+  }
 }
 
 class _PrimaryBtn extends StatefulWidget {
@@ -1225,7 +1345,9 @@ class _PrimaryBtnState extends State<_PrimaryBtn> {
   bool _pressed = false;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) {
           setState(() => _pressed = false);
@@ -1238,29 +1360,31 @@ class _PrimaryBtnState extends State<_PrimaryBtn> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
             decoration: BoxDecoration(
-                color: _T.ink, borderRadius: BorderRadius.circular(_T.r8)),
+                color: t.accent, borderRadius: BorderRadius.circular(AppTokens.r8)),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(widget.label,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: _T.surface,
+                        fontWeight: FontWeight.w700,
+                        color: t.bg,
                         letterSpacing: -0.3)),
-                const SizedBox(width: _T.s8),
-                const Icon(Icons.arrow_forward, size: 13, color: _T.surface),
+                const SizedBox(width: AppTokens.s8),
+                Icon(Icons.arrow_forward, size: 13, color: t.bg),
               ],
             ),
           ),
         ),
       );
+  }
 }
 
 // ─── New / Edit Goal Bottom Sheet ─────────────────────────────────────────────
 class GoalSheet extends StatefulWidget {
   final Goal? existing;
-  const GoalSheet({super.key, this.existing});
+  final List<Goal> allGoals;
+  const GoalSheet({super.key, this.existing, this.allGoals = const []});
 
   @override
   State<GoalSheet> createState() => _GoalSheetState();
@@ -1280,6 +1404,7 @@ class _GoalSheetState extends State<GoalSheet> {
   bool _showAdvanced = false;
   int? _streakGoal;
   List<TimeOfDay> _reminders = [];
+  String? _stackedAfter;
   CompletionTrackingMode _trackingMode = CompletionTrackingMode.stepByStep;
   int _customValue = 1;
   bool _completionsPerDayEnabled = false;
@@ -1288,10 +1413,12 @@ class _GoalSheetState extends State<GoalSheet> {
   bool get _isEdit => widget.existing != null;
 
   static const List<Color> _colors = [
-    Color(0xFFEF4444), Color(0xFFF97316), Color(0xFFF59E0B),
-    Color(0xFF22C55E), Color(0xFF10B981), Color(0xFF3B82F6),
-    Color(0xFF8B5CF6), Color(0xFFA855F7), Color(0xFFEC4899),
-    Color(0xFF06B6D4), Color(0xFF14B8A6), Color(0xFF64748B),
+    Color(0xFF8B7FFF), // Purple
+    Color(0xFFFF6B47), // Coral
+    Color(0xFF00D4A0), // Teal
+    Color(0xFF4DA6FF), // Blue
+    Color(0xFFFFB830), // Amber
+    Color(0xFFC8F135), // Lime
   ];
 
   static final List<IconData> _icons = [
@@ -1371,8 +1498,9 @@ class _GoalSheetState extends State<GoalSheet> {
       _completionsPerDay = e.completionsPerDay;
       _useEmoji = e.useEmoji;
       _selectedEmoji = e.selectedEmoji;
+      _stackedAfter = e.stackedAfter;
     } else {
-      _selectedColorIndex = 5;
+      _selectedColorIndex = 0;
       _selectedIconIndex = 0;
     }
   }
@@ -1385,21 +1513,30 @@ class _GoalSheetState extends State<GoalSheet> {
   }
 
   void _pickCategory() {
+    final t = AppTokens.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => _PickerSheet(
         title: 'Category',
-        children: _categories.map((cat) => _PickerItem(
-          label: cat,
-          selected: _category == cat,
-          onTap: () { setState(() => _category = cat); Navigator.pop(context); },
-        )).toList(),
+        children: CategoryConfig.names.map((cat) {
+          final isNone = cat == 'None';
+          final meta = isNone ? null : CategoryConfig.forName(cat);
+          return _PickerItem(
+            label: cat,
+            selected: _category == cat,
+            leading: isNone
+                ? Icon(Icons.block, size: 16, color: t.txt3)
+                : Icon(meta!.icon, size: 16, color: meta.color),
+            onTap: () { setState(() => _category = cat); Navigator.pop(context); },
+          );
+        }).toList(),
       ),
     );
   }
 
   void _pickTargetDays() {
+    final t = AppTokens.of(context);
     int tempVal = _targetDays;
     showModalBottomSheet(
       context: context,
@@ -1414,7 +1551,7 @@ class _GoalSheetState extends State<GoalSheet> {
           onSelectedItemChanged: (i) => tempVal = _targetOptions[i],
           children: _targetOptions
               .map((d) => Center(child: Text('$d days',
-                  style: const TextStyle(fontSize: 18, color: Color(0xFF1C1C1E)))))
+                  style: TextStyle(fontSize: 18, color: t.txt))))
               .toList(),
         ),
       ),
@@ -1422,6 +1559,7 @@ class _GoalSheetState extends State<GoalSheet> {
   }
 
   void _pickStreakGoal() {
+    final t = AppTokens.of(context);
     int? tempVal = _streakGoal;
     showModalBottomSheet(
       context: context,
@@ -1436,7 +1574,7 @@ class _GoalSheetState extends State<GoalSheet> {
           onSelectedItemChanged: (i) => tempVal = _streakOptions[i],
           children: _streakOptions
               .map((v) => Center(child: Text(v == null ? 'None' : '$v days',
-                  style: const TextStyle(fontSize: 18, color: Color(0xFF1C1C1E)))))
+                  style: TextStyle(fontSize: 18, color: t.txt))))
               .toList(),
         ),
       ),
@@ -1457,7 +1595,88 @@ class _GoalSheetState extends State<GoalSheet> {
 
   void _removeReminder(int index) => setState(() => _reminders.removeAt(index));
 
+  Future<void> _pickStackTrigger() async {
+    final others = widget.allGoals
+        .where((g) => g.title != _nameCtrl.text.trim())
+        .toList();
+    final t = AppTokens.of(context);
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.only(top: 60),
+        decoration: BoxDecoration(
+          color: t.bg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: t.bg2,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                border: Border(bottom: BorderSide(color: t.border)),
+              ),
+              child: Row(
+                children: [
+                  Text('Stack after…',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.txt)),
+                  const Spacer(),
+                  if (_stackedAfter != null)
+                    GestureDetector(
+                      onTap: () { setState(() => _stackedAfter = null); Navigator.pop(context); },
+                      child: Text('Remove', style: t.body(size: 13, color: AppTokens.coral)),
+                    ),
+                ],
+              ),
+            ),
+            if (others.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text('Add more habits to enable stacking.',
+                    textAlign: TextAlign.center, style: t.body(size: 13, color: t.txt3)),
+              )
+            else
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: others.length,
+                separatorBuilder: (context2, i) => Divider(height: 1, color: t.border),
+                itemBuilder: (_, i) {
+                  final g = others[i];
+                  return ListTile(
+                    leading: Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        color: g.color.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: g.useEmoji
+                          ? Center(child: Text(g.selectedEmoji, style: const TextStyle(fontSize: 16)))
+                          : Icon(g.icon, color: g.color, size: 16),
+                    ),
+                    title: Text(g.title, style: t.body(size: 14, color: t.txt)),
+                    trailing: _stackedAfter == g.title
+                        ? Icon(Icons.check_circle_rounded, color: AppTokens.teal, size: 20)
+                        : null,
+                    onTap: () {
+                      setState(() => _stackedAfter = g.title);
+                      Navigator.pop(context);
+                    },
+                  );
+                },
+              ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _pickCustomValue() {
+    final t = AppTokens.of(context);
     int tempVal = _customValue;
     showModalBottomSheet(
       context: context,
@@ -1470,7 +1689,7 @@ class _GoalSheetState extends State<GoalSheet> {
           itemExtent: 44,
           onSelectedItemChanged: (i) => tempVal = i + 1,
           children: List.generate(100, (i) => Center(
-            child: Text('${i + 1}', style: const TextStyle(fontSize: 18, color: Color(0xFF1C1C1E))),
+            child: Text('${i + 1}', style: TextStyle(fontSize: 18, color: t.txt)),
           )),
         ),
       ),
@@ -1480,11 +1699,12 @@ class _GoalSheetState extends State<GoalSheet> {
   void _save() {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
+      final t = AppTokens.of(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Please enter a name', style: _T.body(color: Colors.white)),
-        backgroundColor: _T.ink,
+        content: Text('Please enter a name', style: t.body(color: Colors.white)),
+        backgroundColor: t.bg2,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_T.r8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.r8)),
       ));
       return;
     }
@@ -1506,27 +1726,29 @@ class _GoalSheetState extends State<GoalSheet> {
       completionsPerDay: _completionsPerDay,
       useEmoji: _useEmoji,
       selectedEmoji: _selectedEmoji,
+      stackedAfter: _stackedAfter,
     ));
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     final accent = _colors[_selectedColorIndex];
 
     return Container(
       margin: const EdgeInsets.only(top: 60),
-      decoration: const BoxDecoration(
-        color: _T.canvas,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      decoration: BoxDecoration(
+        color: t.bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         children: [
           Container(
-            decoration: const BoxDecoration(
-              color: _T.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              border: Border(bottom: BorderSide(color: _T.border, width: 1)),
+            decoration: BoxDecoration(
+              color: t.bg2,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              border: Border(bottom: BorderSide(color: t.border, width: 1)),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
@@ -1536,18 +1758,18 @@ class _GoalSheetState extends State<GoalSheet> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                        border: Border.all(color: _T.border),
-                        borderRadius: BorderRadius.circular(_T.r8)),
-                    child: Text('Cancel', style: _T.body(size: 13)),
+                        border: Border.all(color: t.border),
+                        borderRadius: BorderRadius.circular(AppTokens.r8)),
+                    child: Text('Cancel', style: t.body(size: 13)),
                   ),
                 ),
                 Expanded(
                   child: Text(
                     _isEdit ? 'Edit Goal' : 'New Goal',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w500,
-                        color: _T.ink, letterSpacing: -0.3),
+                    style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700,
+                        color: t.txt, letterSpacing: -0.3),
                   ),
                 ),
                 const SizedBox(width: 70),
@@ -1563,15 +1785,15 @@ class _GoalSheetState extends State<GoalSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    color: _T.surface,
+                    color: t.bg2,
                     padding: const EdgeInsets.fromLTRB(16, 28, 16, 28),
                     child: Center(
                       child: Container(
                         width: 72, height: 72,
                         decoration: BoxDecoration(
-                          color: _useEmoji ? _T.canvas : accent,
-                          borderRadius: BorderRadius.circular(_T.r16),
-                          border: Border.all(color: _T.border),
+                          color: _useEmoji ? t.bg3 : accent,
+                          borderRadius: BorderRadius.circular(AppTokens.r16),
+                          border: Border.all(color: t.border),
                         ),
                         child: _useEmoji
                             ? Center(child: Text(_selectedEmoji, style: const TextStyle(fontSize: 34)))
@@ -1579,31 +1801,33 @@ class _GoalSheetState extends State<GoalSheet> {
                       ),
                     ),
                   ),
-                  Divider(height: 1, thickness: 1, color: _T.border),
-                  const SizedBox(height: _T.s16),
+                  Divider(height: 1, thickness: 1, color: t.border),
+                  const SizedBox(height: AppTokens.s16),
 
                   _FormSection(label: 'Name', child: TextField(
                     controller: _nameCtrl,
                     textCapitalization: TextCapitalization.words,
+                    style: t.body(color: t.txt),
                     decoration: _inputDeco('e.g. Read Every Day'),
                   )),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
 
                   _FormSection(label: 'Description', child: TextField(
                     controller: _descCtrl,
                     maxLines: 2,
+                    style: t.body(color: t.txt),
                     decoration: _inputDeco('What does this goal involve?'),
                   )),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
 
-                  _TapRow(label: 'Target Days', value: '$_targetDays days', onTap: _pickTargetDays),
-                  const SizedBox(height: _T.s16),
+                  AppTokensapRow(label: 'Target Days', value: '$_targetDays days', onTap: _pickTargetDays),
+                  const SizedBox(height: AppTokens.s16),
 
-                  _TapRow(label: 'Category', value: _category, onTap: _pickCategory),
-                  const SizedBox(height: _T.s16),
+                  AppTokensapRow(label: 'Category', value: _category, onTap: _pickCategory),
+                  const SizedBox(height: AppTokens.s16),
 
                   Container(
-                    color: _T.surface,
+                    color: t.bg2,
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1612,14 +1836,14 @@ class _GoalSheetState extends State<GoalSheet> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(_useEmoji ? 'Emoji' : 'Icon',
-                                style: const TextStyle(
-                                    fontSize: 14, fontWeight: FontWeight.w500, color: _T.ink)),
+                                style: TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.w700, color: t.txt)),
                             Container(
                               height: 32, width: 180,
                               decoration: BoxDecoration(
-                                  color: _T.canvas,
-                                  borderRadius: BorderRadius.circular(_T.r8),
-                                  border: Border.all(color: _T.border)),
+                                  color: t.bg3,
+                                  borderRadius: BorderRadius.circular(AppTokens.r8),
+                                  border: Border.all(color: t.border)),
                               child: Row(children: [
                                 _SegmentButton(
                                     label: '⚡ Icons',
@@ -1649,11 +1873,11 @@ class _GoalSheetState extends State<GoalSheet> {
                                       decoration: BoxDecoration(
                                         color: _selectedEmoji == _emojis[i]
                                             ? accent.withOpacity(0.12)
-                                            : _T.canvas,
-                                        borderRadius: BorderRadius.circular(_T.r8),
+                                            : t.bg3,
+                                        borderRadius: BorderRadius.circular(AppTokens.r8),
                                         border: _selectedEmoji == _emojis[i]
                                             ? Border.all(color: accent, width: 1.5)
-                                            : Border.all(color: _T.border),
+                                            : Border.all(color: t.border),
                                       ),
                                       child: Center(child: Text(_emojis[i],
                                           style: const TextStyle(fontSize: 19))),
@@ -1670,14 +1894,14 @@ class _GoalSheetState extends State<GoalSheet> {
                                       decoration: BoxDecoration(
                                         color: i == _selectedIconIndex
                                             ? accent.withOpacity(0.12)
-                                            : _T.canvas,
-                                        borderRadius: BorderRadius.circular(_T.r8),
+                                            : t.bg3,
+                                        borderRadius: BorderRadius.circular(AppTokens.r8),
                                         border: i == _selectedIconIndex
                                             ? Border.all(color: accent, width: 1.5)
-                                            : Border.all(color: _T.border),
+                                            : Border.all(color: t.border),
                                       ),
                                       child: Icon(_icons[i],
-                                          color: i == _selectedIconIndex ? accent : _T.ink3,
+                                          color: i == _selectedIconIndex ? accent : t.txt3,
                                           size: 20),
                                     ),
                                   ),
@@ -1687,20 +1911,20 @@ class _GoalSheetState extends State<GoalSheet> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
 
                   Container(
-                    color: _T.surface,
+                    color: t.bg2,
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Color',
+                        Text('Color',
                             style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w500, color: _T.ink)),
+                                fontSize: 14, fontWeight: FontWeight.w700, color: t.txt)),
                         const SizedBox(height: 14),
                         SizedBox(
-                          height: 160,
+                          height: 110,
                           child: GridView.builder(
                             physics: const NeverScrollableScrollPhysics(),
                             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -1711,9 +1935,9 @@ class _GoalSheetState extends State<GoalSheet> {
                               child: Container(
                                 decoration: BoxDecoration(
                                     color: _colors[i],
-                                    borderRadius: BorderRadius.circular(_T.r8),
+                                    borderRadius: BorderRadius.circular(AppTokens.r8),
                                     border: i == _selectedColorIndex
-                                        ? Border.all(color: _T.ink, width: 2)
+                                        ? Border.all(color: t.txt, width: 2)
                                         : null),
                                 child: i == _selectedColorIndex
                                     ? const Icon(Icons.check, color: Colors.white, size: 18)
@@ -1725,12 +1949,12 @@ class _GoalSheetState extends State<GoalSheet> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
 
                   GestureDetector(
                     onTap: () => setState(() => _showAdvanced = !_showAdvanced),
                     child: Container(
-                      color: _T.surface,
+                      color: t.bg2,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1739,7 +1963,7 @@ class _GoalSheetState extends State<GoalSheet> {
                               style: TextStyle(
                                   fontSize: 14,
                                   color: accent,
-                                  fontWeight: FontWeight.w500,
+                                  fontWeight: FontWeight.w700,
                                   letterSpacing: -0.2)),
                           const SizedBox(width: 6),
                           Icon(
@@ -1753,7 +1977,7 @@ class _GoalSheetState extends State<GoalSheet> {
                   ),
 
                   if (_showAdvanced) ...[
-                    const SizedBox(height: _T.s16),
+                    const SizedBox(height: AppTokens.s16),
 
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1775,6 +1999,59 @@ class _GoalSheetState extends State<GoalSheet> {
                         )),
                       ]),
                     ),
+                    // Smart Suggest button — only shown when history is available
+                    if (widget.existing != null &&
+                        SmartReminderService.suggestTime(widget.existing!.completionHistory) != null) ...[
+                      const SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: GestureDetector(
+                          onTap: () {
+                            final suggested = SmartReminderService.suggestTime(
+                                widget.existing!.completionHistory);
+                            if (suggested != null && !_reminders.contains(suggested)) {
+                              setState(() => _reminders.add(suggested));
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: AppTokens.amber.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(AppTokens.r12),
+                              border: Border.all(color: AppTokens.amber.withOpacity(0.35)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.auto_awesome_rounded, color: AppTokens.amber, size: 15),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Smart Suggest',
+                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTokens.amber)),
+                                      Text(
+                                        SmartReminderService.explain(widget.existing!.completionHistory) ?? '',
+                                        style: TextStyle(fontSize: 10, color: AppTokens.amber.withOpacity(0.8)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  () {
+                                    final s = SmartReminderService.suggestTime(widget.existing!.completionHistory)!;
+                                    final h = s.hour == 0 ? 12 : (s.hour > 12 ? s.hour - 12 : s.hour);
+                                    final p = s.hour < 12 ? 'AM' : 'PM';
+                                    return '$h:${s.minute.toString().padLeft(2, '0')} $p';
+                                  }(),
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTokens.amber),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
 
                     if (_reminders.isNotEmpty) ...[
                       const SizedBox(height: 8),
@@ -1782,29 +2059,29 @@ class _GoalSheetState extends State<GoalSheet> {
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Container(
                           decoration: BoxDecoration(
-                              color: _T.surface,
-                              borderRadius: BorderRadius.circular(_T.r12),
-                              border: Border.all(color: _T.border)),
+                              color: t.bg3,
+                              borderRadius: BorderRadius.circular(AppTokens.r12),
+                              border: Border.all(color: t.border)),
                           child: Column(
                             children: _reminders.asMap().entries.map((entry) {
                               final i = entry.key;
-                              final t = entry.value;
+                              final tod = entry.value;
                               return Column(children: [
                                 Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                   child: Row(children: [
                                     Icon(Icons.alarm_outlined, color: accent, size: 16),
                                     const SizedBox(width: 10),
-                                    Expanded(child: Text(t.format(context),
-                                        style: _T.body(size: 14, color: _T.ink))),
+                                    Expanded(child: Text(tod.format(context),
+                                        style: t.body(size: 14, color: t.txt))),
                                     GestureDetector(
                                       onTap: () => _removeReminder(i),
-                                      child: const Icon(Icons.close, color: _T.ink3, size: 16),
+                                      child: Icon(Icons.close, color: t.txt3, size: 16),
                                     ),
                                   ]),
                                 ),
                                 if (i < _reminders.length - 1)
-                                  Divider(height: 1, color: _T.border),
+                                  Divider(height: 1, color: t.border),
                               ]);
                             }).toList(),
                           ),
@@ -1812,24 +2089,62 @@ class _GoalSheetState extends State<GoalSheet> {
                       ),
                     ],
 
-                    const SizedBox(height: _T.s16),
+                    const SizedBox(height: AppTokens.s12),
+
+                    // ── Habit Stacking ──
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: GestureDetector(
+                        onTap: _pickStackTrigger,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: t.bg3,
+                            borderRadius: BorderRadius.circular(AppTokens.r12),
+                            border: Border.all(color: _stackedAfter != null ? accent.withOpacity(0.4) : t.border),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.link_rounded, color: _stackedAfter != null ? accent : t.txt3, size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Habit Stack',
+                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.txt)),
+                                    Text(
+                                      _stackedAfter != null ? 'After: $_stackedAfter' : 'Link to a trigger habit',
+                                      style: t.body(size: 11, color: _stackedAfter != null ? accent : t.txt3),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(Icons.chevron_right_rounded, color: t.txt3, size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: AppTokens.s16),
 
                     Container(
-                      color: _T.surface,
+                      color: t.bg2,
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('How should completions be tracked?',
+                          Text('How should completions be tracked?',
                               style: TextStyle(
-                                  fontSize: 14, color: _T.ink, fontWeight: FontWeight.w500)),
+                                  fontSize: 14, color: t.txt, fontWeight: FontWeight.w700)),
                           const SizedBox(height: 12),
                           Container(
                             height: 36,
                             decoration: BoxDecoration(
-                                color: _T.canvas,
-                                borderRadius: BorderRadius.circular(_T.r8),
-                                border: Border.all(color: _T.border)),
+                                color: t.bg3,
+                                borderRadius: BorderRadius.circular(AppTokens.r8),
+                                border: Border.all(color: t.border)),
                             child: Row(children: [
                               _SegmentButton(
                                 label: 'Step By Step',
@@ -1848,13 +2163,13 @@ class _GoalSheetState extends State<GoalSheet> {
                           const SizedBox(height: 10),
                           if (_trackingMode == CompletionTrackingMode.stepByStep)
                             Text('Increment by 1 with each completion',
-                                style: _T.body(size: 12))
+                                style: t.body(size: 12))
                           else
                             GestureDetector(
                               onTap: _pickCustomValue,
                               child: Row(children: [
                                 Text('Increment by $_customValue with each completion',
-                                    style: _T.body(size: 12, color: accent)),
+                                    style: t.body(size: 12, color: accent)),
                                 const SizedBox(width: 4),
                                 Icon(Icons.edit_outlined, size: 12, color: accent),
                               ]),
@@ -1863,10 +2178,10 @@ class _GoalSheetState extends State<GoalSheet> {
                       ),
                     ),
 
-                    const SizedBox(height: _T.s16),
+                    const SizedBox(height: AppTokens.s16),
 
                     Container(
-                      color: _T.surface,
+                      color: t.bg2,
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1874,9 +2189,9 @@ class _GoalSheetState extends State<GoalSheet> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text('Completions Per Day',
+                              Text('Completions Per Day',
                                   style: TextStyle(
-                                      fontSize: 14, color: _T.ink, fontWeight: FontWeight.w500)),
+                                      fontSize: 14, color: t.txt, fontWeight: FontWeight.w700)),
                               CupertinoSwitch(
                                 value: _completionsPerDayEnabled,
                                 activeColor: accent,
@@ -1890,12 +2205,12 @@ class _GoalSheetState extends State<GoalSheet> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                 decoration: BoxDecoration(
-                                    color: _T.canvas,
-                                    borderRadius: BorderRadius.circular(_T.r8),
-                                    border: Border.all(color: _T.border)),
+                                    color: t.bg3,
+                                    borderRadius: BorderRadius.circular(AppTokens.r8),
+                                    border: Border.all(color: t.border)),
                                 child: Text('$_completionsPerDay / Day',
-                                    style: const TextStyle(
-                                        fontSize: 14, fontWeight: FontWeight.w500, color: _T.ink)),
+                                    style: TextStyle(
+                                        fontSize: 14, fontWeight: FontWeight.w700, color: t.txt)),
                               ),
                               const SizedBox(width: 10),
                               _CounterBtn(
@@ -1920,23 +2235,23 @@ class _GoalSheetState extends State<GoalSheet> {
                             ]),
                             const SizedBox(height: 8),
                             Text('The day will count when this number is met',
-                                style: _T.body(size: 12)),
+                                style: t.body(size: 12)),
                           ],
                         ],
                       ),
                     ),
                   ],
 
-                  const SizedBox(height: _T.s32),
+                  const SizedBox(height: AppTokens.s32),
                 ],
               ),
             ),
           ),
 
           Container(
-            decoration: const BoxDecoration(
-              color: _T.surface,
-              border: Border(top: BorderSide(color: _T.border, width: 1)),
+            decoration: BoxDecoration(
+              color: t.bg2,
+              border: Border(top: BorderSide(color: t.border, width: 1)),
             ),
             padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: SafeArea(
@@ -1948,21 +2263,21 @@ class _GoalSheetState extends State<GoalSheet> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     decoration: BoxDecoration(
-                        color: _T.ink,
-                        borderRadius: BorderRadius.circular(_T.r8)),
+                        color: t.accent,
+                        borderRadius: BorderRadius.circular(AppTokens.r8)),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           _isEdit ? 'Save Changes' : 'Create Goal',
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: _T.surface,
+                              fontWeight: FontWeight.w700,
+                              color: t.bg,
                               letterSpacing: -0.3),
                         ),
-                        const SizedBox(width: _T.s8),
-                        const Icon(Icons.arrow_forward, size: 13, color: _T.surface),
+                        const SizedBox(width: AppTokens.s8),
+                        Icon(Icons.arrow_forward, size: 13, color: t.bg),
                       ],
                     ),
                   ),
@@ -1976,6 +2291,7 @@ class _GoalSheetState extends State<GoalSheet> {
   }
 
   void _pickCompletionsPerDay() {
+    final t = AppTokens.of(context);
     int tempVal = _completionsPerDay;
     showModalBottomSheet(
       context: context,
@@ -1989,29 +2305,32 @@ class _GoalSheetState extends State<GoalSheet> {
           onSelectedItemChanged: (i) => tempVal = i + 1,
           children: List.generate(50, (i) => Center(
             child: Text('${i + 1}',
-                style: const TextStyle(fontSize: 18, color: Color(0xFF1C1C1E))),
+                style: TextStyle(fontSize: 18, color: t.txt)),
           )),
         ),
       ),
     );
   }
 
-  InputDecoration _inputDeco(String hint) => InputDecoration(
+  InputDecoration _inputDeco(String hint) {
+    final t = AppTokens.of(context);
+    return InputDecoration(
         hintText: hint,
-        hintStyle: _T.body(size: 14, color: _T.ink3),
+        hintStyle: t.body(size: 14, color: t.txt3),
         filled: true,
-        fillColor: _T.canvas,
+        fillColor: t.bg3,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(_T.r8),
-            borderSide: const BorderSide(color: _T.border)),
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            borderSide: BorderSide(color: t.border)),
         enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(_T.r8),
-            borderSide: const BorderSide(color: _T.border)),
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            borderSide: BorderSide(color: t.border)),
         focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(_T.r8),
-            borderSide: const BorderSide(color: _T.ink, width: 1.5)),
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            borderSide: BorderSide(color: t.txt, width: 1.5)),
       );
+  }
 }
 
 // ─── Advanced tile ─────────────────────────────────────────────────────────────
@@ -2020,55 +2339,61 @@ class _AdvancedTile extends StatelessWidget {
   const _AdvancedTile({required this.label, required this.value});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
-            color: _T.surface,
-            borderRadius: BorderRadius.circular(_T.r12),
-            border: Border.all(color: _T.border)),
+            color: t.bg3,
+            borderRadius: BorderRadius.circular(AppTokens.r12),
+            border: Border.all(color: t.border)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: _T.label(size: 11)),
+            Text(label, style: t.label(size: 11)),
             const SizedBox(height: 4),
             Row(children: [
               Expanded(child: Text(value,
-                  style: const TextStyle(
-                      fontSize: 14, color: _T.ink, fontWeight: FontWeight.w500))),
-              const Icon(Icons.chevron_right, color: _T.ink3, size: 16),
+                  style: TextStyle(
+                      fontSize: 14, color: t.txt, fontWeight: FontWeight.w700))),
+              Icon(Icons.chevron_right, color: t.txt3, size: 16),
             ]),
           ],
         ),
       );
+  }
 }
 
 // ─── Reusable sheet widgets ────────────────────────────────────────────────────
-class _TapRow extends StatelessWidget {
+class AppTokensapRow extends StatelessWidget {
   final String label, value;
   final VoidCallback onTap;
-  const _TapRow({required this.label, required this.value, required this.onTap});
+  const AppTokensapRow({required this.label, required this.value, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTap: onTap,
         child: Container(
-          color: _T.surface,
+          color: t.bg2,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(label,
-                  style: const TextStyle(
-                      fontSize: 14, color: _T.ink, fontWeight: FontWeight.w400)),
+                  style: TextStyle(
+                      fontSize: 14, color: t.txt, fontWeight: FontWeight.w400)),
               Row(children: [
-                Text(value, style: _T.body(size: 14)),
+                Text(value, style: t.body(size: 14)),
                 const SizedBox(width: 4),
-                const Icon(Icons.chevron_right, color: _T.ink3, size: 18),
+                Icon(Icons.chevron_right, color: t.txt3, size: 18),
               ]),
             ],
           ),
         ),
       );
+  }
 }
 
 class _PickerSheet extends StatelessWidget {
@@ -2077,10 +2402,12 @@ class _PickerSheet extends StatelessWidget {
   const _PickerSheet({required this.title, required this.children});
 
   @override
-  Widget build(BuildContext context) => Container(
-        decoration: const BoxDecoration(
-          color: _T.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
+        decoration: BoxDecoration(
+          color: t.bg2,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2089,7 +2416,7 @@ class _PickerSheet extends StatelessWidget {
               margin: const EdgeInsets.only(top: 10),
               width: 36, height: 4,
               decoration: BoxDecoration(
-                  color: _T.border, borderRadius: BorderRadius.circular(2)),
+                  color: t.border, borderRadius: BorderRadius.circular(2)),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -2098,18 +2425,18 @@ class _PickerSheet extends StatelessWidget {
                 children: [
                   const SizedBox(width: 60),
                   Text(title,
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w500, color: _T.ink)),
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700, color: t.txt)),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
                     child: Text('Done',
                         style: TextStyle(
-                            color: _T.purple, fontSize: 14, fontWeight: FontWeight.w500)),
+                            color: t.accent, fontSize: 14, fontWeight: FontWeight.w700)),
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, thickness: 1, color: _T.border),
+            Divider(height: 1, thickness: 1, color: t.border),
             ConstrainedBox(
               constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
               child: SingleChildScrollView(child: Column(children: children)),
@@ -2118,16 +2445,20 @@ class _PickerSheet extends StatelessWidget {
           ],
         ),
       );
+  }
 }
 
 class _PickerItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  const _PickerItem({required this.label, required this.selected, required this.onTap});
+  final Widget? leading;
+  const _PickerItem({required this.label, required this.selected, required this.onTap, this.leading});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTap: onTap,
         child: Container(
           color: Colors.transparent,
@@ -2135,17 +2466,18 @@ class _PickerItem extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(label, style: _T.body(size: 15, color: _T.ink)),
-                  if (selected) const Icon(Icons.check, color: _T.purple, size: 18),
+                  if (leading != null) ...[leading!, const SizedBox(width: 10)],
+                  Expanded(child: Text(label, style: t.body(size: 15, color: t.txt))),
+                  if (selected) Icon(Icons.check, color: t.accent, size: 18),
                 ],
               ),
             ),
-            Divider(height: 1, indent: 16, thickness: 1, color: _T.border),
+            Divider(height: 1, indent: 16, thickness: 1, color: t.border),
           ]),
         ),
       );
+  }
 }
 
 class _CupertinoPickerSheet extends StatelessWidget {
@@ -2155,10 +2487,12 @@ class _CupertinoPickerSheet extends StatelessWidget {
   const _CupertinoPickerSheet({required this.title, required this.onDone, required this.child});
 
   @override
-  Widget build(BuildContext context) => Container(
-        decoration: const BoxDecoration(
-          color: _T.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
+        decoration: BoxDecoration(
+          color: t.bg2,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2167,7 +2501,7 @@ class _CupertinoPickerSheet extends StatelessWidget {
               margin: const EdgeInsets.only(top: 10),
               width: 36, height: 4,
               decoration: BoxDecoration(
-                  color: _T.border, borderRadius: BorderRadius.circular(2)),
+                  color: t.border, borderRadius: BorderRadius.circular(2)),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -2176,23 +2510,24 @@ class _CupertinoPickerSheet extends StatelessWidget {
                 children: [
                   const SizedBox(width: 60),
                   Text(title,
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w500, color: _T.ink)),
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700, color: t.txt)),
                   TextButton(
                     onPressed: onDone,
                     child: Text('Done',
                         style: TextStyle(
-                            color: _T.purple, fontSize: 14, fontWeight: FontWeight.w500)),
+                            color: t.accent, fontSize: 14, fontWeight: FontWeight.w700)),
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, thickness: 1, color: _T.border),
+            Divider(height: 1, thickness: 1, color: t.border),
             SizedBox(height: 200, child: child),
             SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
           ],
         ),
       );
+  }
 }
 
 class _SegmentButton extends StatelessWidget {
@@ -2204,25 +2539,28 @@ class _SegmentButton extends StatelessWidget {
       {required this.label, required this.selected, required this.accent, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => Expanded(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Expanded(
         child: GestureDetector(
           onTap: onTap,
           child: Container(
             margin: const EdgeInsets.all(3),
             decoration: BoxDecoration(
-              color: selected ? _T.surface : Colors.transparent,
+              color: selected ? t.bg2 : Colors.transparent,
               borderRadius: BorderRadius.circular(6),
-              border: selected ? Border.all(color: _T.border) : null,
+              border: selected ? Border.all(color: t.border) : null,
             ),
             alignment: Alignment.center,
             child: Text(label,
                 style: TextStyle(
                     fontSize: 12,
-                    fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
-                    color: selected ? _T.ink : _T.ink3)),
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                    color: selected ? accent : t.txt3)),
           ),
         ),
       );
+  }
 }
 
 class _CounterBtn extends StatelessWidget {
@@ -2232,19 +2570,22 @@ class _CounterBtn extends StatelessWidget {
   const _CounterBtn({required this.icon, required this.onTap, required this.accent});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTap: onTap,
         child: Container(
           width: 36, height: 36,
           decoration: BoxDecoration(
-            color: _T.canvas,
-            borderRadius: BorderRadius.circular(_T.r8),
-            border: Border.all(color: _T.border),
+            color: t.bg3,
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            border: Border.all(color: t.border),
           ),
           child: Icon(icon,
-              color: onTap != null ? _T.ink : _T.ink3, size: 16),
+              color: onTap != null ? t.txt : t.txt3, size: 16),
         ),
       );
+  }
 }
 
 class _FormSection extends StatelessWidget {
@@ -2253,18 +2594,230 @@ class _FormSection extends StatelessWidget {
   const _FormSection({required this.label, required this.child});
 
   @override
-  Widget build(BuildContext context) => Container(
-        color: _T.surface,
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
+        color: t.bg2,
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label,
-                style: const TextStyle(
-                    fontSize: 13, color: _T.ink2, fontWeight: FontWeight.w400)),
+                style: TextStyle(
+                    fontSize: 13, color: t.txt2, fontWeight: FontWeight.w400)),
             const SizedBox(height: 8),
             child,
           ],
         ),
       );
+  }
+}
+// ─── Habit Stack Suggestions Sheet ───────────────────────────────────────────
+class _HabitStackSheet extends StatefulWidget {
+  final List<Goal> goals;
+  final void Function(String habitTitle, String anchor) onApply;
+  const _HabitStackSheet({required this.goals, required this.onApply});
+
+  @override
+  State<_HabitStackSheet> createState() => _HabitStackSheetState();
+}
+
+class _HabitStackSheetState extends State<_HabitStackSheet> {
+  late List<StackSuggestion> _suggestions;
+  final Set<int> _applied = {};
+  final Set<int> _dismissed = {};
+
+  @override
+  void initState() {
+    super.initState();
+    final existingStacks = {
+      for (final g in widget.goals) g.title: g.stackedAfter,
+    };
+    _suggestions = HabitStackService.suggest(
+      habitTitles: widget.goals.map((g) => g.title).toList(),
+      existingStacks: existingStacks,
+      seed: DateTime.now().weekOfYear,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final visible = _suggestions
+        .asMap()
+        .entries
+        .where((e) => !_dismissed.contains(e.key))
+        .toList();
+
+    final screenHeight = MediaQuery.of(context).size.height;
+    return Container(
+      height: screenHeight * 0.82,
+      decoration: BoxDecoration(
+        color: t.bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(color: t.border, borderRadius: BorderRadius.circular(2)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Container(
+                  width: 38, height: 38,
+                  decoration: BoxDecoration(
+                    color: AppTokens.purple.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.auto_awesome_rounded, color: AppTokens.purple, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('AI Stack Suggestions',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700,
+                              color: t.txt, letterSpacing: -0.4)),
+                      Text('Link habits to daily anchors',
+                          style: TextStyle(fontSize: 12, color: t.txt3)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Divider(height: 1, color: t.border),
+          if (visible.isEmpty)
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.check_circle_rounded, color: Color(0xFF1D9E75), size: 36),
+                      const SizedBox(height: 12),
+                      Text('All habits are stacked!',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.txt)),
+                      const SizedBox(height: 6),
+                      Text('Edit stacks anytime from each habit.',
+                          style: TextStyle(fontSize: 12, color: t.txt3)),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+              itemCount: visible.length,
+              separatorBuilder: (context2, i2) => const SizedBox(height: 10),
+              itemBuilder: (_, i) {
+                final idx = visible[i].key;
+                final s = visible[i].value;
+                final isApplied = _applied.contains(idx);
+                return AnimatedOpacity(
+                  duration: const Duration(milliseconds: 250),
+                  opacity: isApplied ? 0.5 : 1.0,
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: t.bg3,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isApplied
+                            ? const Color(0xFF1D9E75).withOpacity(0.4)
+                            : AppTokens.purple.withOpacity(0.18),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(s.anchorEmoji, style: const TextStyle(fontSize: 18)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: RichText(
+                                text: TextSpan(
+                                  style: TextStyle(fontSize: 13, color: t.txt, letterSpacing: -0.2),
+                                  children: [
+                                    TextSpan(text: s.anchor,
+                                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                                    TextSpan(text: '  →  ',
+                                        style: TextStyle(color: AppTokens.purple, fontWeight: FontWeight.w700)),
+                                    TextSpan(text: s.habitTitle,
+                                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () => setState(() => _dismissed.add(idx)),
+                              child: Icon(Icons.close_rounded, size: 16, color: t.txt3),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(s.reason,
+                            style: TextStyle(fontSize: 11, color: t.txt3, height: 1.4)),
+                        const SizedBox(height: 10),
+                        GestureDetector(
+                          onTap: isApplied ? null : () {
+                            widget.onApply(s.habitTitle, s.anchor);
+                            setState(() => _applied.add(idx));
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: isApplied
+                                  ? const Color(0xFF1D9E75).withOpacity(0.12)
+                                  : AppTokens.purple,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isApplied ? Icons.check_rounded : Icons.link_rounded,
+                                  size: 13,
+                                  color: isApplied ? const Color(0xFF1D9E75) : Colors.white,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  isApplied ? 'Applied' : 'Apply Stack',
+                                  style: TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.w600,
+                                    color: isApplied ? const Color(0xFF1D9E75) : Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+extension on DateTime {
+  int get weekOfYear {
+    final doy = difference(DateTime(year, 1, 1)).inDays + 1;
+    return ((doy - weekday + 10) / 7).floor();
+  }
 }

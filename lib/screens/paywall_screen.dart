@@ -1,7 +1,11 @@
 // ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:habit_tracker/config/app_config.dart';
 import 'package:habit_tracker/services/payment_service.dart';
+import 'package:habit_tracker/services/cloud_functions_service.dart';
 import 'package:habit_tracker/screens/track_progress_screen.dart';
 
 class PaywallScreen extends StatefulWidget {
@@ -20,7 +24,13 @@ class _PaywallScreenState extends State<PaywallScreen> {
     super.initState();
     _paymentService.init();
 
-    _paymentService.onSuccess = (res) {
+    _paymentService.onSuccess = (res) async {
+      // Optimistically set premium locally so the UI responds immediately
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(AppConfig.keyPremiumUnlocked, true);
+      // Then verify and sync the authoritative value from Firestore
+      // (the Razorpay webhook may have already set premium=true server-side)
+      await CloudFunctionsService.checkAndSyncPremium();
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const TrackProgressScreen()),
@@ -46,20 +56,24 @@ class _PaywallScreenState extends State<PaywallScreen> {
   }
 
   void _pay() {
-  if (const bool.fromEnvironment('dart.vm.product') == false) {
-    // Debug mode — bypass payment for simulator testing
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const TrackProgressScreen()),
+    if (const bool.fromEnvironment('dart.vm.product') == false) {
+      // Debug mode — bypass payment for simulator testing
+      SharedPreferences.getInstance().then(
+        (p) => p.setBool(AppConfig.keyPremiumUnlocked, true),
+      );
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const TrackProgressScreen()),
+      );
+      return;
+    }
+    setState(() => _loading = true);
+    final user = FirebaseAuth.instance.currentUser;
+    _paymentService.openCheckout(
+      userPhone: user?.phoneNumber ?? '',
+      userEmail: user?.email ?? '',
+      userName: user?.displayName ?? '',
     );
-    return;
   }
-  setState(() => _loading = true);
-  _paymentService.openCheckout(
-    userPhone: '9999999999',
-    userEmail: 'user@example.com',
-    userName: 'User Name',
-  );
-}
 
   @override
   Widget build(BuildContext context) {
@@ -91,7 +105,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                 width: 80, height: 80,
                 decoration: BoxDecoration(
                   color: const Color(0xFFF0EDFE),
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: const Color(0xFFC8C0F8)),
                 ),
                 child: const Icon(Icons.show_chart_rounded, color: Color(0xFF7C6FD8), size: 36),
@@ -106,10 +120,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                 style: TextStyle(fontSize: 15, color: Color(0xFF5C5C5C), height: 1.6, letterSpacing: -0.1),
               ),
               const SizedBox(height: 32),
-              _FeatureRow(icon: Icons.bar_chart_rounded, label: 'Weekly completion charts'),
-              _FeatureRow(icon: Icons.local_fire_department_outlined, label: 'Streak tracking'),
-              _FeatureRow(icon: Icons.grid_view_rounded, label: 'Activity heatmap'),
-              _FeatureRow(icon: Icons.emoji_events_outlined, label: 'Top performer insights'),
+              ...AppConfig.paywallFeatures.map((f) => _FeatureRow(icon: f.icon, label: f.label)),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -131,12 +142,12 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     backgroundColor: const Color(0xFF7C6FD8),
                     disabledBackgroundColor: const Color(0xFFC8C0F8),
                     elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   child: _loading
                       ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Text('Unlock for ₹199',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.white, letterSpacing: -0.3)),
+                      : Text('Unlock for ${AppConfig.priceDisplay}',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.white, letterSpacing: -0.3)),
                 ),
               ),
               const SizedBox(height: 12),

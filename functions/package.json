@@ -1,0 +1,17 @@
+{
+  "name": "habit-tracker-functions",
+  "version": "1.0.0",
+  "description": "Firebase Cloud Functions backend for HabitFlow",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^10.3.0",
+    "firebase-functions": "^4.9.0"
+  },
+  "devDependencies": {
+    "firebase-functions-test": "^3.0.0"
+  },
+  "private": true
+}

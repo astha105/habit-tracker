@@ -1,38 +1,41 @@
-// ignore_for_file: deprecated_member_use, unused_element, unused_field, curly_braces_in_flow_control_structures, unused_shown_name
+// ignore_for_file: deprecated_member_use, unused_field, curly_braces_in_flow_control_structures, unused_shown_name
 
 import 'package:flutter/material.dart';
-import 'package:habit_tracker/screens/goals_screen.dart' show Goal, GoalsStorageService;
+import 'package:habit_tracker/screens/goals_screen.dart' show Goal;
+import 'package:habit_tracker/services/firestore_service.dart';
 import 'package:habit_tracker/screens/streaks_screen.dart' show Streak, StreaksStorageService;
 
-// ─── Design Tokens ────────────────────────────────────────────────────────────
 class _T {
-  _T._();
-  static const Color ink      = Color(0xFF0D0D0D);
-  static const Color ink2     = Color(0xFF5C5C5C);
-  static const Color ink3     = Color(0xFFA3A3A3);
-  static const Color surface  = Color(0xFFFFFFFF);
-  static const Color canvas   = Color(0xFFFAFAF8);
-  static const Color border   = Color(0xFFE6E5E0);
-  static const Color purple       = Color(0xFF7C6FD8);
-  static const Color purpleDark   = Color(0xFF534AB7);
-  static const Color purpleDeep   = Color(0xFF3C3489);
-  static const Color purpleBg     = Color(0xFFF0EDFE);
-  static const Color purpleBorder = Color(0xFFC8C0F8);
-  static const Color coral       = Color(0xFFD85A30);
-  static const Color coralDark   = Color(0xFF993C1D);
-  static const Color coralBg     = Color(0xFFFEF0E8);
-  static const Color coralBorder = Color(0xFFF5C4B3);
-  static const Color teal       = Color(0xFF1D9E75);
-  static const Color tealDark   = Color(0xFF0F6E56);
-  static const Color tealBg     = Color(0xFFEBF8F2);
-  static const Color tealBorder = Color(0xFF9FE1CB);
-  static const Color blue       = Color(0xFF378ADD);
-  static const Color blueDark   = Color(0xFF185FA5);
-  static const Color blueBg     = Color(0xFFEBF3FD);
-  static const Color blueBorder = Color(0xFFB5D4F4);
-  static const Color amber       = Color(0xFFBA7517);
-  static const Color amberBg     = Color(0xFFFEF5E7);
-  static const Color amberBorder = Color(0xFFFAC775);
+  final bool isDark;
+  const _T(this.isDark);
+  static _T of(BuildContext ctx) =>
+      _T(Theme.of(ctx).brightness == Brightness.dark);
+
+  // ── Backgrounds ──
+  Color get bg   => isDark ? const Color(0xFF0C0C14) : const Color(0xFFFAFAF8);
+  Color get bg2  => isDark ? const Color(0xFF13131E) : const Color(0xFFFFFFFF);
+  Color get bg3  => isDark ? const Color(0xFF1A1A28) : const Color(0xFFF0EEF8);
+  Color get bg4  => isDark ? const Color(0xFF212134) : const Color(0xFFF0EEFF);
+
+  // ── Text ──
+  Color get txt  => isDark ? const Color(0xFFF2F1F8) : const Color(0xFF0D0D0D);
+  Color get txt2 => isDark ? const Color(0xFF8A8AA0) : const Color(0xFF5C5C5C);
+  Color get txt3 => isDark ? const Color(0xFF7878A0) : const Color(0xFFA3A3A3);
+
+  // ── Borders ──
+  Color get border => isDark ? const Color(0x1AFFFFFF) : const Color(0xFFE6E5E0);
+
+  // ── Accent ──
+  Color get accent => isDark ? const Color(0xFFC8F135) : const Color(0xFF7C6FD8);
+
+  // ── Category Colors (same in both modes) ──
+  static const Color purple = Color(0xFF8B7FFF);
+  static const Color coral  = Color(0xFFFF6B47);
+  static const Color teal   = Color(0xFF00D4A0);
+  static const Color blue   = Color(0xFF4DA6FF);
+  static const Color amber  = Color(0xFFFFB830);
+
+  // ── Spacing (unchanged) ──
   static const double s4  = 4;
   static const double s8  = 8;
   static const double s12 = 12;
@@ -41,18 +44,24 @@ class _T {
   static const double s24 = 24;
   static const double s32 = 32;
   static const double s40 = 40;
-  static const double r8  = 8;
-  static const double r12 = 12;
-  static const double r16 = 16;
+
+  // ── Border Radius (unchanged) ──
+  static const double r8   = 8;
+  static const double r12  = 10;
+  static const double r16  = 10;
   static const double r100 = 100;
-  static TextStyle heading({double size = 24, double spacing = -1.0}) =>
-      TextStyle(fontSize: size, fontWeight: FontWeight.w500, color: ink,
+
+  // ── TextStyle helpers (now instance methods) ──
+  TextStyle heading({double size = 24, double spacing = -1.0}) =>
+      TextStyle(fontSize: size, fontWeight: FontWeight.w700, color: txt,
           height: 1.1, letterSpacing: spacing);
-  static TextStyle body({double size = 14, Color? color}) =>
-      TextStyle(fontSize: size, color: color ?? ink2, height: 1.6, letterSpacing: -0.1);
-  static TextStyle label({double size = 11, Color? color}) =>
+
+  TextStyle body({double size = 14, Color? color}) =>
+      TextStyle(fontSize: size, color: color ?? txt2, height: 1.6, letterSpacing: -0.1);
+
+  TextStyle label({double size = 11, Color? color}) =>
       TextStyle(fontSize: size, fontWeight: FontWeight.w500,
-          color: color ?? ink3, letterSpacing: 0.06 * size);
+          color: color ?? txt3, letterSpacing: 0.06 * size);
 }
 
 // ─── Data for display ─────────────────────────────────────────────────────────
@@ -128,7 +137,7 @@ List<Streak> _streaks = [];  // Streak from streaks_screen.dart
   }
 Future<void> _loadData() async {
   try {
-    final goals = await GoalsStorageService.loadGoals();
+    final goals = await FirestoreService().loadHabits();
     final streaks = await StreaksStorageService.loadStreaks();
     if (mounted) {
       setState(() {
@@ -150,13 +159,15 @@ Future<void> _loadData() async {
 
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     if (_loading) {
       return Scaffold(
-        backgroundColor: _T.canvas,
+        backgroundColor: t.bg,
         appBar: _buildAppBar(),
-        body: const Center(
+        body: Center(
           child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation(_T.purple),
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation(t.accent),
           ),
         ),
       );
@@ -174,19 +185,20 @@ Future<void> _loadData() async {
             : allHabits.where((h) => _streaks.any((s) => s.title == h.name)).toList();
 
     return Scaffold(
-      backgroundColor: _T.canvas,
+      backgroundColor: t.bg,
       appBar: _buildAppBar(),
       body: allHabits.isEmpty ? _buildEmpty() : _buildBody(filteredHabits, allHabits),
     );
   }
 
   PreferredSizeWidget _buildAppBar() {
+    final t = _T.of(context);
     return AppBar(
-      backgroundColor: _T.surface,
+      backgroundColor: t.bg,
       elevation: 0,
       scrolledUnderElevation: 0,
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios, color: _T.ink, size: 18),
+        icon: Icon(Icons.arrow_back_ios, color: t.txt, size: 18),
         onPressed: () => Navigator.of(context).maybePop(),
       ),
       centerTitle: true,
@@ -195,22 +207,23 @@ Future<void> _loadData() async {
         children: [
           _LogoMark(size: 22),
           const SizedBox(width: _T.s8),
-          const Text('Progress',
+          Text('Progress',
               style: TextStyle(
                   fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: _T.ink,
+                  fontWeight: FontWeight.w700,
+                  color: t.txt,
                   letterSpacing: -0.4)),
         ],
       ),
-      bottom: const PreferredSize(
-        preferredSize: Size.fromHeight(1),
-        child: Divider(height: 1, thickness: 1, color: _T.border),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Divider(height: 1, thickness: 1, color: t.border),
       ),
     );
   }
 
   Widget _buildEmpty() {
+    final t = _T.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
@@ -220,19 +233,19 @@ Future<void> _loadData() async {
             Container(
               width: 72, height: 72,
               decoration: BoxDecoration(
-                color: _T.tealBg,
+                color: _T.teal.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(_T.r16),
-                border: Border.all(color: _T.tealBorder),
+                border: Border.all(color: t.border),
               ),
               child: const Icon(Icons.show_chart_rounded, color: _T.teal, size: 32),
             ),
             const SizedBox(height: _T.s20),
-            Text('No data yet', style: _T.heading(size: 22)),
+            Text('No data yet', style: t.heading(size: 22)),
             const SizedBox(height: _T.s8),
             Text(
               'Start logging your habits to see your progress charts here.',
               textAlign: TextAlign.center,
-              style: _T.body(size: 14),
+              style: t.body(size: 14),
             ),
           ],
         ),
@@ -241,6 +254,7 @@ Future<void> _loadData() async {
   }
 
   Widget _buildBody(List<_HabitEntry> filteredHabits, List<_HabitEntry> allHabits) {
+    final t = _T.of(context);
     final totalDaysLogged = filteredHabits.fold(0, (s, h) => s + h.currentDays);
     final bestStreak = filteredHabits.isEmpty
         ? 0
@@ -275,35 +289,31 @@ Future<void> _loadData() async {
             avgProgress: avgProgress,
             completed: completedHabits,
           ),
-          const Divider(height: 1, thickness: 1, color: _T.border),
+          Divider(height: 1, thickness: 1, color: t.border),
           const _SectionHeader(
             label: 'This Week',
-            bg: _T.tealBg, border: _T.tealBorder,
-            dot: _T.teal, text: _T.tealDark,
+            accent: _T.teal,
           ),
           _WeeklyChart(data: weeklyData(), habits: filteredHabits),
-          const Divider(height: 1, thickness: 1, color: _T.border),
+          Divider(height: 1, thickness: 1, color: t.border),
           const _SectionHeader(
             label: 'Habit Breakdown',
-            bg: _T.purpleBg, border: _T.purpleBorder,
-            dot: _T.purple, text: _T.purpleDark,
+            accent: _T.purple,
           ),
           _FilterTabs(controller: _tabCtrl),
           const SizedBox(height: _T.s8),
           ...filteredHabits.map((h) => _HabitProgressCard(habit: h)),
-          const Divider(height: 1, thickness: 1, color: _T.border),
+          Divider(height: 1, thickness: 1, color: t.border),
           const _SectionHeader(
             label: 'Activity Heatmap',
-            bg: _T.coralBg, border: _T.coralBorder,
-            dot: _T.coral, text: _T.coralDark,
+            accent: _T.coral,
           ),
           _ActivityHeatmap(habits: filteredHabits),
-          const Divider(height: 1, thickness: 1, color: _T.border),
+          Divider(height: 1, thickness: 1, color: t.border),
           if (filteredHabits.isNotEmpty) ...[
             const _SectionHeader(
               label: 'Top Performer',
-              bg: _T.amberBg, border: _T.amberBorder,
-              dot: _T.amber, text: _T.amber,
+              accent: _T.amber,
             ),
             _TopPerformerCard(
                 habit: filteredHabits
@@ -327,41 +337,42 @@ class _StatsStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     final w = MediaQuery.of(context).size.width;
     final isPhone = w < 600;
     if (isPhone) {
       return Container(
-        color: _T.surface,
+        color: t.bg2,
         child: Column(children: [
           IntrinsicHeight(
             child: Row(children: [
-              Expanded(child: _StatCell(icon: Icons.show_chart_rounded, value: '$totalDays', label: 'Days Logged', iconBg: _T.tealBg, iconColor: _T.teal, valueColor: _T.tealDark, labelColor: _T.teal)),
-              const VerticalDivider(width: 1, thickness: 1, color: _T.border),
-              Expanded(child: _StatCell(icon: Icons.local_fire_department_outlined, value: '${bestStreak}d', label: 'Best Streak', iconBg: _T.coralBg, iconColor: _T.coral, valueColor: _T.coralDark, labelColor: _T.coral)),
+              Expanded(child: _StatCell(icon: Icons.show_chart_rounded, value: '$totalDays', label: 'Days Logged', iconColor: _T.teal)),
+              VerticalDivider(width: 1, thickness: 1, color: t.border),
+              Expanded(child: _StatCell(icon: Icons.local_fire_department_outlined, value: '${bestStreak}d', label: 'Best Streak', iconColor: _T.coral)),
             ]),
           ),
-          const Divider(height: 1, thickness: 1, color: _T.border),
+          Divider(height: 1, thickness: 1, color: t.border),
           IntrinsicHeight(
             child: Row(children: [
-              Expanded(child: _StatCell(icon: Icons.radio_button_checked_outlined, value: '${(avgProgress * 100).toStringAsFixed(0)}%', label: 'Avg Progress', iconBg: _T.purpleBg, iconColor: _T.purple, valueColor: _T.purpleDeep, labelColor: _T.purple)),
-              const VerticalDivider(width: 1, thickness: 1, color: _T.border),
-              Expanded(child: _StatCell(icon: Icons.emoji_events_outlined, value: '$completed', label: 'Completed', iconBg: _T.amberBg, iconColor: _T.amber, valueColor: _T.amber, labelColor: _T.amber)),
+              Expanded(child: _StatCell(icon: Icons.radio_button_checked_outlined, value: '${(avgProgress * 100).toStringAsFixed(0)}%', label: 'Avg Progress', iconColor: _T.purple)),
+              VerticalDivider(width: 1, thickness: 1, color: t.border),
+              Expanded(child: _StatCell(icon: Icons.emoji_events_outlined, value: '$completed', label: 'Completed', iconColor: _T.amber)),
             ]),
           ),
         ]),
       );
     }
     return Container(
-      color: _T.surface,
+      color: t.bg2,
       child: IntrinsicHeight(
         child: Row(children: [
-          Expanded(child: _StatCell(icon: Icons.show_chart_rounded, value: '$totalDays', label: 'Days Logged', iconBg: _T.tealBg, iconColor: _T.teal, valueColor: _T.tealDark, labelColor: _T.teal)),
-          const VerticalDivider(width: 1, thickness: 1, color: _T.border),
-          Expanded(child: _StatCell(icon: Icons.local_fire_department_outlined, value: '${bestStreak}d', label: 'Best Streak', iconBg: _T.coralBg, iconColor: _T.coral, valueColor: _T.coralDark, labelColor: _T.coral)),
-          const VerticalDivider(width: 1, thickness: 1, color: _T.border),
-          Expanded(child: _StatCell(icon: Icons.radio_button_checked_outlined, value: '${(avgProgress * 100).toStringAsFixed(0)}%', label: 'Avg Progress', iconBg: _T.purpleBg, iconColor: _T.purple, valueColor: _T.purpleDeep, labelColor: _T.purple)),
-          const VerticalDivider(width: 1, thickness: 1, color: _T.border),
-          Expanded(child: _StatCell(icon: Icons.emoji_events_outlined, value: '$completed', label: 'Completed', iconBg: _T.amberBg, iconColor: _T.amber, valueColor: _T.amber, labelColor: _T.amber)),
+          Expanded(child: _StatCell(icon: Icons.show_chart_rounded, value: '$totalDays', label: 'Days Logged', iconColor: _T.teal)),
+          VerticalDivider(width: 1, thickness: 1, color: t.border),
+          Expanded(child: _StatCell(icon: Icons.local_fire_department_outlined, value: '${bestStreak}d', label: 'Best Streak', iconColor: _T.coral)),
+          VerticalDivider(width: 1, thickness: 1, color: t.border),
+          Expanded(child: _StatCell(icon: Icons.radio_button_checked_outlined, value: '${(avgProgress * 100).toStringAsFixed(0)}%', label: 'Avg Progress', iconColor: _T.purple)),
+          VerticalDivider(width: 1, thickness: 1, color: t.border),
+          Expanded(child: _StatCell(icon: Icons.emoji_events_outlined, value: '$completed', label: 'Completed', iconColor: _T.amber)),
         ]),
       ),
     );
@@ -371,22 +382,23 @@ class _StatsStrip extends StatelessWidget {
 class _StatCell extends StatelessWidget {
   final IconData icon;
   final String value, label;
-  final Color iconBg, iconColor, valueColor, labelColor;
-  const _StatCell({required this.icon, required this.value, required this.label, required this.iconBg, required this.iconColor, required this.valueColor, required this.labelColor});
+  final Color iconColor;
+  const _StatCell({required this.icon, required this.value, required this.label, required this.iconColor});
 
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 36, height: 36, decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(_T.r8)), child: Icon(icon, size: 16, color: iconColor)),
+          Container(width: 36, height: 36, decoration: BoxDecoration(color: iconColor.withOpacity(0.12), borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: iconColor.withOpacity(0.25))), child: Icon(icon, size: 16, color: iconColor)),
           const SizedBox(height: _T.s12),
-          Text(value, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w500, color: valueColor, letterSpacing: -1.2)),
+          Text(value, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: t.txt, letterSpacing: -1.2)),
           const SizedBox(height: 3),
-          Text(label, style: _T.label(size: 10, color: labelColor)),
+          Text(label, style: t.label(size: 10, color: iconColor)),
         ],
       ),
     );
@@ -396,15 +408,18 @@ class _StatCell extends StatelessWidget {
 // ─── Section Header ───────────────────────────────────────────────────────────
 class _SectionHeader extends StatelessWidget {
   final String label;
-  final Color bg, border, dot, text;
-  const _SectionHeader({required this.label, required this.bg, required this.border, required this.dot, required this.text});
+  final Color accent;
+  const _SectionHeader({required this.label, required this.accent});
 
   @override
-  Widget build(BuildContext context) => Container(
-        color: _T.canvas,
+  Widget build(BuildContext context) {
+      final t = _T.of(context);
+      return Container(
+        color: t.bg,
         padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
-        child: _EyebrowPill(label: label.toUpperCase(), bg: bg, border: border, dot: dot, text: text),
+        child: _EyebrowPill(label: label.toUpperCase(), bg: accent.withOpacity(0.1), border: accent.withOpacity(0.25), dot: accent, text: accent),
       );
+  }
 }
 
 // ─── Weekly Chart ─────────────────────────────────────────────────────────────
@@ -415,12 +430,13 @@ class _WeeklyChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final today = DateTime.now().weekday - 1;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Container(
-        decoration: BoxDecoration(color: _T.surface, borderRadius: BorderRadius.circular(_T.r16), border: Border.all(color: _T.border)),
+        decoration: BoxDecoration(color: t.bg2, borderRadius: BorderRadius.circular(_T.r16), border: Border.all(color: t.border)),
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -428,11 +444,11 @@ class _WeeklyChart extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Daily Completion', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _T.ink, letterSpacing: -0.3)),
+                Text('Daily Completion', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.txt, letterSpacing: -0.3)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: _T.tealBg, borderRadius: BorderRadius.circular(_T.r100), border: Border.all(color: _T.tealBorder)),
-                  child: Text('${habits.length} habit${habits.length == 1 ? '' : 's'}', style: _T.label(size: 10, color: _T.teal)),
+                  decoration: BoxDecoration(color: _T.teal.withOpacity(0.12), borderRadius: BorderRadius.circular(_T.r100), border: Border.all(color: _T.teal.withOpacity(0.25))),
+                  child: Text('${habits.length} habit${habits.length == 1 ? '' : 's'}', style: t.label(size: 10, color: _T.teal)),
                 ),
               ],
             ),
@@ -452,11 +468,11 @@ class _WeeklyChart extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           if (!isFuture && pct > 0)
-                            Text('${(pct * 100).toStringAsFixed(0)}%', style: _T.label(size: 9, color: isToday ? _T.purple : _T.teal)),
+                            Text('${(pct * 100).toStringAsFixed(0)}%', style: t.label(size: 9, color: isToday ? _T.purple : _T.teal)),
                           const SizedBox(height: 3),
                           Container(
                             height: 60,
-                            decoration: BoxDecoration(color: _T.canvas, borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: _T.border)),
+                            decoration: BoxDecoration(color: t.bg3, borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: t.border)),
                             alignment: Alignment.bottomCenter,
                             clipBehavior: Clip.hardEdge,
                             child: isFuture
@@ -477,7 +493,7 @@ class _WeeklyChart extends StatelessWidget {
             Row(
               children: List.generate(7, (i) {
                 final isToday = i == today;
-                return Expanded(child: Text(days[i].substring(0, 1), textAlign: TextAlign.center, style: _T.label(size: 10, color: isToday ? _T.purple : _T.ink3)));
+                return Expanded(child: Text(days[i].substring(0, 1), textAlign: TextAlign.center, style: t.label(size: 10, color: isToday ? _T.purple : t.txt3)));
               }),
             ),
             const SizedBox(height: _T.s16),
@@ -498,36 +514,39 @@ class _LegendDot extends StatelessWidget {
   final String label;
   const _LegendDot({required this.color, required this.label});
   @override
-  Widget build(BuildContext context) => Row(children: [
+  Widget build(BuildContext context) {
+      final t = _T.of(context);
+      return Row(children: [
         Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 6),
-        Text(label, style: _T.label(size: 11)),
+        Text(label, style: t.label(size: 11)),
       ]);
+  }
 }
 
-// ─── Filter Tabs ──────────────────────────────────────────────────────────────
+// ─── Filter Tabs ─────────────────────────────────────────────���────────────────
 class _FilterTabs extends StatelessWidget {
   final TabController controller;
   const _FilterTabs({required this.controller});
 
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
         height: 36,
-        decoration: BoxDecoration(color: _T.canvas, borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: _T.border)),
+        decoration: BoxDecoration(color: t.bg3, borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: t.border)),
         child: TabBar(
           controller: controller,
           indicator: BoxDecoration(
-              color: _T.surface,
+              color: t.bg2,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: _T.border),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 4, offset: const Offset(0, 1))]),
+              border: Border.all(color: t.border)),
           indicatorSize: TabBarIndicatorSize.tab,
           dividerColor: Colors.transparent,
-          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: _T.ink),
-          unselectedLabelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: _T.ink3),
+          labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: t.txt),
+          unselectedLabelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: t.txt3),
           labelPadding: EdgeInsets.zero,
           tabs: const [Tab(text: 'All'), Tab(text: 'Goals'), Tab(text: 'Streaks')],
         ),
@@ -548,6 +567,7 @@ class _HabitProgressCardState extends State<_HabitProgressCard> {
   bool _hovered = false;
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     final h = widget.habit;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -555,7 +575,7 @@ class _HabitProgressCardState extends State<_HabitProgressCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        decoration: BoxDecoration(color: _hovered ? const Color(0xFFF5F4F1) : _T.surface, borderRadius: BorderRadius.circular(_T.r12), border: Border.all(color: _T.border)),
+        decoration: BoxDecoration(color: _hovered ? t.bg3 : t.bg2, borderRadius: BorderRadius.circular(_T.r12), border: Border.all(color: _hovered ? h.color.withOpacity(0.4) : t.border)),
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -564,24 +584,24 @@ class _HabitProgressCardState extends State<_HabitProgressCard> {
               AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 width: 38, height: 38,
-                decoration: BoxDecoration(color: _hovered ? h.color : h.color.withOpacity(0.12), borderRadius: BorderRadius.circular(_T.r8)),
+                decoration: BoxDecoration(color: _hovered ? h.color : h.color.withOpacity(0.12), borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: h.color.withOpacity(0.25))),
                 child: Icon(h.icon, color: _hovered ? Colors.white : h.color, size: 18),
               ),
               const SizedBox(width: _T.s12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(h.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _T.ink, letterSpacing: -0.3)),
+                Text(h.name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.txt, letterSpacing: -0.3)),
                 const SizedBox(height: 2),
-                Text('${h.currentDays} / ${h.targetDays} days', style: _T.label(size: 11)),
+                Text('${h.currentDays} / ${h.targetDays} days', style: t.label(size: 11)),
               ])),
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text(h.pct, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: h.color, letterSpacing: -0.8)),
-                Text('complete', style: _T.label(size: 9)),
+                Text(h.pct, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: h.color, letterSpacing: -0.8)),
+                Text('complete', style: t.label(size: 9)),
               ]),
             ]),
             const SizedBox(height: _T.s12),
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(value: h.progress, minHeight: 5, backgroundColor: _T.border, valueColor: AlwaysStoppedAnimation(h.color)),
+              child: LinearProgressIndicator(value: h.progress, minHeight: 5, backgroundColor: t.bg3, valueColor: AlwaysStoppedAnimation(h.color)),
             ),
             const SizedBox(height: _T.s12),
             _MiniWeekDots(habit: h),
@@ -594,8 +614,8 @@ class _HabitProgressCardState extends State<_HabitProgressCard> {
               if (h.progress >= 1.0)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: _T.tealBg, borderRadius: BorderRadius.circular(_T.r100), border: Border.all(color: _T.tealBorder)),
-                  child: Text('✓ Done', style: _T.label(size: 10, color: _T.teal)),
+                  decoration: BoxDecoration(color: _T.teal.withOpacity(0.12), borderRadius: BorderRadius.circular(_T.r100), border: Border.all(color: _T.teal.withOpacity(0.25))),
+                  child: Text('✓ Done', style: t.label(size: 10, color: _T.teal)),
                 ),
             ]),
           ],
@@ -611,15 +631,18 @@ class _StatPill extends StatelessWidget {
   final Color color;
   const _StatPill({required this.icon, required this.label, required this.color});
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+      final t = _T.of(context);
+      return Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(_T.r100), border: Border.all(color: color.withOpacity(0.2))),
+        decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(_T.r100), border: Border.all(color: color.withOpacity(0.25))),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 10, color: color),
           const SizedBox(width: 4),
-          Text(label, style: _T.label(size: 10, color: color)),
+          Text(label, style: t.label(size: 10, color: color)),
         ]),
       );
+  }
 }
 
 // ─── Mini Week Dots ───────────────────────────────────────────────────────────
@@ -628,6 +651,7 @@ class _MiniWeekDots extends StatelessWidget {
   const _MiniWeekDots({required this.habit});
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     final now = DateTime.now();
     final days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     final weekday = now.weekday;
@@ -638,14 +662,14 @@ class _MiniWeekDots extends StatelessWidget {
         final isFuture = date.isAfter(now);
         final isLogged = habit.history.any((d) => d.year == date.year && d.month == date.month && d.day == date.day);
         Color dotColor;
-        if (isFuture) dotColor = _T.canvas;
+        if (isFuture) dotColor = t.bg3;
         else if (isLogged) dotColor = habit.color;
-        else dotColor = _T.border;
+        else dotColor = t.border;
         return Expanded(
           child: Column(children: [
             Container(height: 5, margin: const EdgeInsets.symmetric(horizontal: 2), decoration: BoxDecoration(color: dotColor, borderRadius: BorderRadius.circular(3))),
             const SizedBox(height: 3),
-            Text(days[i], style: _T.label(size: 9, color: isFuture ? _T.canvas : _T.ink3)),
+            Text(days[i], style: t.label(size: 9, color: isFuture ? t.txt3 : t.txt3)),
           ]),
         );
       }),
@@ -659,6 +683,7 @@ class _ActivityHeatmap extends StatelessWidget {
   const _ActivityHeatmap({required this.habits});
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     final now = DateTime.now();
     const totalDays = 70;
     final startDate = now.subtract(const Duration(days: totalDays - 1));
@@ -673,7 +698,7 @@ class _ActivityHeatmap extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Container(
-        decoration: BoxDecoration(color: _T.surface, borderRadius: BorderRadius.circular(_T.r16), border: Border.all(color: _T.border)),
+        decoration: BoxDecoration(color: t.bg2, borderRadius: BorderRadius.circular(_T.r16), border: Border.all(color: t.border)),
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -681,8 +706,8 @@ class _ActivityHeatmap extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Last 10 Weeks', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _T.ink, letterSpacing: -0.3)),
-                _EyebrowPill(label: '${habits.fold(0, (s, h) => s + h.totalCompletions)} logs', bg: _T.coralBg, border: _T.coralBorder, dot: _T.coral, text: _T.coralDark),
+                Text('Last 10 Weeks', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.txt, letterSpacing: -0.3)),
+                _EyebrowPill(label: '${habits.fold(0, (s, h) => s + h.totalCompletions)} logs', bg: _T.coral.withOpacity(0.12), border: _T.coral.withOpacity(0.25), dot: _T.coral, text: _T.coral),
               ],
             ),
             const SizedBox(height: _T.s16),
@@ -690,7 +715,7 @@ class _ActivityHeatmap extends StatelessWidget {
               const SizedBox(width: 24),
               ...List.generate(7, (i) {
                 const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-                return Expanded(child: Text(dayNames[i], textAlign: TextAlign.center, style: _T.label(size: 9)));
+                return Expanded(child: Text(dayNames[i], textAlign: TextAlign.center, style: t.label(size: 9)));
               }),
             ]),
             const SizedBox(height: _T.s4),
@@ -698,7 +723,7 @@ class _ActivityHeatmap extends StatelessWidget {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 3),
                 child: Row(children: [
-                  SizedBox(width: 24, child: week % 2 == 0 ? Text('W${10 - week}', style: _T.label(size: 8), textAlign: TextAlign.left) : const SizedBox()),
+                  SizedBox(width: 24, child: week % 2 == 0 ? Text('W${10 - week}', style: t.label(size: 8), textAlign: TextAlign.left) : const SizedBox()),
                   ...List.generate(7, (day) {
                     final dayIndex = week * 7 + day;
                     final date = startDate.add(Duration(days: dayIndex));
@@ -707,13 +732,13 @@ class _ActivityHeatmap extends StatelessWidget {
                     final isFuture = date.isAfter(now);
                     final intensity = isFuture ? 0.0 : (count / maxCount);
                     Color cellColor;
-                    if (isFuture || count == 0) cellColor = _T.canvas;
+                    if (isFuture || count == 0) cellColor = t.bg3;
                     else cellColor = _T.coral.withOpacity(0.2 + intensity * 0.8);
                     return Expanded(
                       child: Container(
                         margin: const EdgeInsets.symmetric(horizontal: 2),
                         height: 14,
-                        decoration: BoxDecoration(color: cellColor, borderRadius: BorderRadius.circular(3), border: Border.all(color: isFuture || count == 0 ? _T.border : Colors.transparent)),
+                        decoration: BoxDecoration(color: cellColor, borderRadius: BorderRadius.circular(3), border: Border.all(color: isFuture || count == 0 ? t.border : Colors.transparent)),
                       ),
                     );
                   }),
@@ -722,11 +747,11 @@ class _ActivityHeatmap extends StatelessWidget {
             }),
             const SizedBox(height: _T.s12),
             Row(children: [
-              Text('Less', style: _T.label(size: 10)),
+              Text('Less', style: t.label(size: 10)),
               const SizedBox(width: _T.s8),
               ...List.generate(5, (i) => Container(width: 12, height: 12, margin: const EdgeInsets.only(right: 3), decoration: BoxDecoration(color: _T.coral.withOpacity(0.1 + i * 0.2), borderRadius: BorderRadius.circular(3)))),
               const SizedBox(width: _T.s8),
-              Text('More', style: _T.label(size: 10)),
+              Text('More', style: t.label(size: 10)),
             ]),
           ],
         ),
@@ -741,28 +766,37 @@ class _TopPerformerCard extends StatelessWidget {
   const _TopPerformerCard({required this.habit});
   @override
   Widget build(BuildContext context) {
+    final t = _T.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Container(
-        decoration: BoxDecoration(color: _T.ink, borderRadius: BorderRadius.circular(_T.r16)),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [habit.color.withOpacity(0.15), t.bg2],
+          ),
+          borderRadius: BorderRadius.circular(_T.r16),
+          border: Border.all(color: habit.color.withOpacity(0.25)),
+        ),
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Container(width: 48, height: 48, decoration: BoxDecoration(color: habit.color.withOpacity(0.2), borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: habit.color.withOpacity(0.4))), child: Icon(habit.icon, color: habit.color, size: 22)),
+              Container(width: 48, height: 48, decoration: BoxDecoration(color: habit.color.withOpacity(0.15), borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: habit.color.withOpacity(0.4))), child: Icon(habit.icon, color: habit.color, size: 22)),
               const SizedBox(width: _T.s12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(habit.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: _T.surface, letterSpacing: -0.4)),
+                Text(habit.name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: t.txt, letterSpacing: -0.4)),
                 const SizedBox(height: 3),
-                Text('Your best habit this period', style: _T.label(size: 11, color: const Color(0xFF888888))),
+                Text('Your best habit this period', style: t.label(size: 11, color: t.txt3)),
               ])),
-              Text(habit.pct, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w500, color: habit.color, letterSpacing: -1.2)),
+              Text(habit.pct, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: habit.color, letterSpacing: -1.2)),
             ]),
             const SizedBox(height: _T.s20),
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(value: habit.progress, minHeight: 4, backgroundColor: const Color(0xFF2A2A2A), valueColor: AlwaysStoppedAnimation(habit.color)),
+              child: LinearProgressIndicator(value: habit.progress, minHeight: 4, backgroundColor: t.bg3, valueColor: AlwaysStoppedAnimation(habit.color)),
             ),
             const SizedBox(height: _T.s16),
             Row(children: [
@@ -783,15 +817,18 @@ class _DarkBadge extends StatelessWidget {
   final String value, sub;
   const _DarkBadge({required this.value, required this.sub});
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+      final t = _T.of(context);
+      return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(_T.r8)),
+        decoration: BoxDecoration(color: t.bg3, borderRadius: BorderRadius.circular(_T.r8), border: Border.all(color: t.border)),
         child: Column(children: [
-          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: _T.surface)),
+          Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: t.txt)),
           const SizedBox(height: 2),
-          Text(sub, style: _T.label(size: 9, color: const Color(0xFF666666))),
+          Text(sub, style: t.label(size: 9, color: t.txt3)),
         ]),
       );
+  }
 }
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
@@ -799,11 +836,14 @@ class _LogoMark extends StatelessWidget {
   final double size;
   const _LogoMark({required this.size});
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+      final t = _T.of(context);
+      return Container(
         width: size, height: size,
-        decoration: BoxDecoration(color: _T.ink, borderRadius: BorderRadius.circular(size * 0.22)),
-        child: Center(child: Container(width: size * 0.30, height: size * 0.30, decoration: const BoxDecoration(color: _T.surface, shape: BoxShape.circle))),
+        decoration: BoxDecoration(color: t.accent, borderRadius: BorderRadius.circular(size * 0.22)),
+        child: Center(child: Container(width: size * 0.30, height: size * 0.30, decoration: BoxDecoration(color: t.bg, shape: BoxShape.circle))),
       );
+  }
 }
 
 class _EyebrowPill extends StatelessWidget {
@@ -817,7 +857,7 @@ class _EyebrowPill extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 6, height: 6, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: text, letterSpacing: 0.6)),
+          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: text, letterSpacing: 0.6)),
         ]),
       );
 }

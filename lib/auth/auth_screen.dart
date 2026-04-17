@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:habit_tracker/config/app_config.dart';
+import 'package:habit_tracker/theme/app_colors.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -14,20 +16,31 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen>
     with SingleTickerProviderStateMixin {
-  late TabController _tabController;
   bool _loading = false;
+  bool _isSignUp = false;
+  late final AnimationController _entryCtrl;
+  late final Animation<double> _fadeAnim;
+  late final Animation<Offset> _slideAnim;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    // FIX: Rebuild when tab changes so the card resizes for Sign Up content
-    _tabController.addListener(() => setState(() {}));
+    _entryCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _fadeAnim =
+        CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.06),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOut));
+    _entryCtrl.forward();
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _entryCtrl.dispose();
     super.dispose();
   }
 
@@ -43,7 +56,7 @@ class _AuthScreenState extends State<AuthScreen>
       } else {
         final GoogleSignIn googleSignIn = GoogleSignIn(
           scopes: ['email', 'profile'],
-          serverClientId: '760177477560-a8uihu7lsou342va4c2lopq1d4flc3vd.apps.googleusercontent.com',
+          serverClientId: AppConfig.googleServerClientId,
         );
 
         try {
@@ -71,8 +84,10 @@ class _AuthScreenState extends State<AuthScreen>
           googleAuth = await googleUser.authentication;
         }
 
-        debugPrint('🔑 Access Token: ${googleAuth.accessToken != null ? "✓" : "✗"}');
-        debugPrint('🔑 ID Token: ${googleAuth.idToken != null ? "✓" : "✗"}');
+        debugPrint(
+            '🔑 Access Token: ${googleAuth.accessToken != null ? "✓" : "✗"}');
+        debugPrint(
+            '🔑 ID Token: ${googleAuth.idToken != null ? "✓" : "✗"}');
 
         if (googleAuth.accessToken == null && googleAuth.idToken == null) {
           throw Exception(
@@ -96,17 +111,19 @@ class _AuthScreenState extends State<AuthScreen>
       debugPrint('❌ Google Sign-In Error: $e');
       if (mounted) {
         String errorMessage = 'Sign-in failed. Please try again.';
-
         if (e.toString().contains('network_error')) {
           errorMessage = 'Network error. Check your connection.';
         } else if (e.toString().contains('sign_in_failed')) {
-          errorMessage = 'Sign-in failed. Please check your Google Play Services.';
+          errorMessage =
+              'Sign-in failed. Please check your Google Play Services.';
         }
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMessage),
-            backgroundColor: Colors.red[400],
+            backgroundColor: AppColors.coral,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
             action: SnackBarAction(
               label: 'Retry',
               textColor: Colors.white,
@@ -122,147 +139,231 @@ class _AuthScreenState extends State<AuthScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // ── Adaptive color tokens ──────────────────────────────────────────────
+    final bg        = isDark ? AppColors.bg        : const Color(0xFFF7F5FF);
+    final cardBg    = isDark ? AppColors.bg2       : Colors.white;
+    final inputBg   = isDark ? AppColors.bg3       : const Color(0xFFF0EEF8);
+    final txtPrimary   = isDark ? AppColors.textPrimary  : const Color(0xFF0D0D1A);
+    final txtSecondary = isDark ? AppColors.textSecondary: const Color(0xFF5C5870);
+    final txtMuted     = isDark ? AppColors.textMuted    : const Color(0xFF9B97AA);
+    final accent    = isDark ? AppColors.lime       : AppColors.purpleLight;
+    final borderColor  = isDark ? Colors.white.withOpacity(0.07) : AppColors.borderLight;
+    final dividerColor = isDark ? Colors.white.withOpacity(0.07) : AppColors.borderLight;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FC),
+      backgroundColor: bg,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 40),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            child: FadeTransition(
+              opacity: _fadeAnim,
+              child: SlideTransition(
+                position: _slideAnim,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const SizedBox(height: 24),
 
-                  // App Icon
-                  Container(
-                    width: 90,
-                    height: 90,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF8B5CF6).withOpacity(0.4),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
+                    // ── App icon ──────────────────────────────────────────
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppColors.purple, Color(0xFF6B5FD8)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.track_changes_rounded,
-                      size: 50,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // App Title
-                  const Text(
-                    'HabitFlow',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1F2937),
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Subtitle
-                  const Text(
-                    'Build better habits, one day at a time',
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: Color(0xFF6B7280),
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-
-                  // Auth Card
-                  Container(
-                    constraints: const BoxConstraints(maxWidth: 450),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 20,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Tab Bar
-                        Container(
-                          margin: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF3F4F6),
-                            borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.purple.withOpacity(isDark ? 0.35 : 0.25),
+                            blurRadius: 28,
+                            offset: const Offset(0, 12),
                           ),
-                          child: TabBar(
-                            controller: _tabController,
-                            indicator: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              boxShadow: [
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.track_changes_rounded,
+                        size: 38,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+
+                    // ── App name ──────────────────────────────────────────
+                    Text(
+                      'Welcome To ${AppConfig.appName}',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        color: txtPrimary,
+                        letterSpacing: -1,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: Text(
+                        _isSignUp
+                            ? 'Start your journey to better habits'
+                            : 'Build the best version of yourself\nby perfecting your habits',
+                        key: ValueKey('subtitle_$_isSignUp'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: txtSecondary,
+                          height: 1.55,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 40),
+
+                    // ── Auth card ─────────────────────────────────────────
+                    Container(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: borderColor),
+                        boxShadow: isDark
+                            ? []
+                            : [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
+                                  color: Colors.black.withOpacity(0.06),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 4),
                                 ),
                               ],
+                      ),
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: Text(
+                              _isSignUp ? 'Create account' : 'Welcome back',
+                              key: ValueKey('title_$_isSignUp'),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                                color: txtPrimary,
+                                letterSpacing: -0.4,
+                              ),
                             ),
-                            indicatorSize: TabBarIndicatorSize.tab,
-                            dividerColor: Colors.transparent,
-                            labelColor: const Color(0xFF1F2937),
-                            unselectedLabelColor: const Color(0xFF9CA3AF),
-                            labelStyle: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            tabs: const [
-                              Tab(text: 'Login'),
-                              Tab(text: 'Sign Up'),
-                            ],
                           ),
-                        ),
+                          const SizedBox(height: 4),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: Text(
+                              _isSignUp
+                                  ? 'Sign up to start tracking your habits'
+                                  : 'Sign in to continue your streak',
+                              key: ValueKey('sub_$_isSignUp'),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: txtMuted,
+                              ),
+                            ),
+                          ),
 
-                        // FIX: Replaced fixed SizedBox(height: 220) with
-                        // IndexedStack so each tab's content sizes itself
-                        // naturally, eliminating the 33px overflow on Sign Up.
-                        IndexedStack(
-                          index: _tabController.index,
-                          children: [
-                            _buildLoginTab(),
-                            _buildSignUpTab(),
+                          const SizedBox(height: 24),
+                          _buildGoogleButton(isDark: isDark, inputBg: inputBg, txtPrimary: txtPrimary, accent: accent, borderColor: borderColor),
+
+                          if (_isSignUp) ...[
+                            const SizedBox(height: 14),
+                            RichText(
+                              textAlign: TextAlign.center,
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: txtMuted,
+                                ),
+                                children: [
+                                  const TextSpan(
+                                      text:
+                                          'By signing up, you agree to our '),
+                                  TextSpan(
+                                    text: 'Terms',
+                                    style: TextStyle(
+                                      color: accent,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const TextSpan(text: ' and '),
+                                  TextSpan(
+                                    text: 'Privacy Policy',
+                                    style: TextStyle(
+                                      color: accent,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
-                        ),
+
+                          const SizedBox(height: 20),
+                          Divider(height: 1, color: dividerColor),
+                          const SizedBox(height: 20),
+
+                          GestureDetector(
+                            onTap: () =>
+                                setState(() => _isSignUp = !_isSignUp),
+                            child: RichText(
+                              textAlign: TextAlign.center,
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: txtSecondary,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: _isSignUp
+                                        ? 'Already have an account? '
+                                        : "Don't have an account? ",
+                                  ),
+                                  TextSpan(
+                                    text: _isSignUp ? 'Log in' : 'Sign up',
+                                    style: TextStyle(
+                                      color: accent,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 36),
+
+                    // ── Feature pills ─────────────────────────────────────
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildFeaturePill(Icons.show_chart_rounded, 'Track Progress',
+                            isDark: isDark, cardBg: cardBg, accent: accent, txtSecondary: txtSecondary, borderColor: borderColor),
+                        const SizedBox(width: 10),
+                        _buildFeaturePill(Icons.local_fire_department_rounded, 'Build Streaks',
+                            isDark: isDark, cardBg: cardBg, accent: accent, txtSecondary: txtSecondary, borderColor: borderColor),
                       ],
                     ),
-                  ),
 
-                  const SizedBox(height: 32),
-
-                  // Footer
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildFeature(Icons.show_chart, 'Track Progress'),
-                      const SizedBox(width: 32),
-                      _buildFeature(Icons.local_fire_department, 'Build Streaks'),
-                    ],
-                  ),
-                  const SizedBox(height: 40),
-                ],
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
             ),
           ),
@@ -271,123 +372,33 @@ class _AuthScreenState extends State<AuthScreen>
     );
   }
 
-  Widget _buildLoginTab() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const Text(
-            'Welcome back',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1F2937),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Sign in to access your habits',
-            style: TextStyle(
-              fontSize: 15,
-              color: Color(0xFF6B7280),
-            ),
-          ),
-          const SizedBox(height: 24),
-          _buildGoogleButton(),
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSignUpTab() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const Text(
-            'Create an account',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1F2937),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Start your journey to better habits today',
-            style: TextStyle(
-              fontSize: 15,
-              color: Color(0xFF6B7280),
-            ),
-          ),
-          const SizedBox(height: 24),
-          _buildGoogleButton(),
-          const SizedBox(height: 16),
-
-          // Terms
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: RichText(
-              textAlign: TextAlign.center,
-              text: const TextSpan(
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF6B7280),
-                ),
-                children: [
-                  TextSpan(text: 'By signing up, you agree to our '),
-                  TextSpan(
-                    text: 'Terms',
-                    style: TextStyle(
-                      color: Color(0xFF8B5CF6),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  TextSpan(text: ' and '),
-                  TextSpan(
-                    text: 'Privacy Policy',
-                    style: TextStyle(
-                      color: Color(0xFF8B5CF6),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGoogleButton() {
+  Widget _buildGoogleButton({
+    required bool isDark,
+    required Color inputBg,
+    required Color txtPrimary,
+    required Color accent,
+    required Color borderColor,
+  }) {
     return SizedBox(
-      width: double.infinity,
-      height: 50,
+      height: 52,
       child: ElevatedButton(
         onPressed: _loading ? null : _signInWithGoogle,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF1F2937),
+          backgroundColor: inputBg,
+          foregroundColor: txtPrimary,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.grey[300]!),
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: borderColor),
           ),
         ),
         child: _loading
-            ? const SizedBox(
+            ? SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)),
+                  valueColor: AlwaysStoppedAnimation(accent),
                 ),
               )
             : Row(
@@ -399,11 +410,12 @@ class _AuthScreenState extends State<AuthScreen>
                     width: 20,
                   ),
                   const SizedBox(width: 12),
-                  const Text(
-                    'Sign in with Google',
+                  Text(
+                    'Continue with Google',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
+                      color: txtPrimary,
                     ),
                   ),
                 ],
@@ -412,24 +424,35 @@ class _AuthScreenState extends State<AuthScreen>
     );
   }
 
-  Widget _buildFeature(IconData icon, String label) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: 18,
-          color: const Color(0xFF8B5CF6),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            color: Color(0xFF6B7280),
-            fontWeight: FontWeight.w500,
+  Widget _buildFeaturePill(IconData icon, String label, {
+    required bool isDark,
+    required Color cardBg,
+    required Color accent,
+    required Color txtSecondary,
+    required Color borderColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(100),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: accent),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: txtSecondary,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

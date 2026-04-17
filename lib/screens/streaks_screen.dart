@@ -1,70 +1,12 @@
-// ignore_for_file: deprecated_member_use, unused_local_variable, unused_field, avoid_print
+// ignore_for_file: deprecated_member_use, unused_local_variable, unused_field, avoid_print, use_build_context_synchronously, use_key_in_widget_constructors
 
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:habit_tracker/theme/app_tokens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'dart:math' as math;
 
-// ─── Design Tokens (mirrors landing screen _T) ────────────────────────────────
-class _T {
-  _T._();
-  static const Color ink      = Color(0xFF0D0D0D);
-  static const Color ink2     = Color(0xFF5C5C5C);
-  static const Color ink3     = Color(0xFFA3A3A3);
-  static const Color surface  = Color(0xFFFFFFFF);
-  static const Color canvas   = Color(0xFFFAFAF8);
-  static const Color border   = Color(0xFFE6E5E0);
-
-  static const Color purple       = Color(0xFF7C6FD8);
-  static const Color purpleDark   = Color(0xFF534AB7);
-  static const Color purpleDeep   = Color(0xFF3C3489);
-  static const Color purpleBg     = Color(0xFFF0EDFE);
-  static const Color purpleBorder = Color(0xFFC8C0F8);
-
-  static const Color coral       = Color(0xFFD85A30);
-  static const Color coralDark   = Color(0xFF993C1D);
-  static const Color coralBg     = Color(0xFFFEF0E8);
-  static const Color coralBorder = Color(0xFFF5C4B3);
-
-  static const Color teal       = Color(0xFF1D9E75);
-  static const Color tealDark   = Color(0xFF0F6E56);
-  static const Color tealBg     = Color(0xFFEBF8F2);
-  static const Color tealBorder = Color(0xFF9FE1CB);
-
-  static const Color blue       = Color(0xFF378ADD);
-  static const Color blueDark   = Color(0xFF185FA5);
-  static const Color blueBg     = Color(0xFFEBF3FD);
-  static const Color blueBorder = Color(0xFFB5D4F4);
-
-  static const Color amber       = Color(0xFFBA7517);
-  static const Color amberBg     = Color(0xFFFEF5E7);
-  static const Color amberBorder = Color(0xFFFAC775);
-
-  static const double s4  = 4;
-  static const double s8  = 8;
-  static const double s12 = 12;
-  static const double s16 = 16;
-  static const double s20 = 20;
-  static const double s24 = 24;
-  static const double s32 = 32;
-  static const double s40 = 40;
-
-  static const double r8   = 8;
-  static const double r12  = 12;
-  static const double r16  = 16;
-  static const double r100 = 100;
-
-  static TextStyle heading({double size = 24, double spacing = -1.0}) =>
-      TextStyle(fontSize: size, fontWeight: FontWeight.w500, color: ink,
-          height: 1.1, letterSpacing: spacing);
-
-  static TextStyle body({double size = 14, Color? color}) =>
-      TextStyle(fontSize: size, color: color ?? ink2, height: 1.6, letterSpacing: -0.1);
-
-  static TextStyle label({double size = 11, Color? color}) =>
-      TextStyle(fontSize: size, fontWeight: FontWeight.w500,
-          color: color ?? ink3, letterSpacing: 0.06 * size);
-}
 
 // ─── Data model ───────────────────────────────────────────────────────────────
 class Streak {
@@ -79,6 +21,11 @@ class Streak {
   DateTime? lastLoggedDate;
   List<DateTime> completionHistory;
 
+  // ── Streak Freeze ──────────────────────────────────────────────────────────
+  int freezesRemaining;
+  bool frozenThisWeek;
+  DateTime? lastFreezeReset;
+
   Streak({
     required this.title,
     required this.description,
@@ -90,6 +37,9 @@ class Streak {
     required this.totalCompletions,
     this.lastLoggedDate,
     List<DateTime>? completionHistory,
+    this.freezesRemaining = 1,
+    this.frozenThisWeek = false,
+    this.lastFreezeReset,
   }) : completionHistory = completionHistory ?? [];
 
   bool get loggedToday {
@@ -120,6 +70,405 @@ class Streak {
   }
 }
 
+// ─── XP Service ──────────────────────────────────────────────────────────────
+class _XpService {
+  static const _xpKey = 'user_xp';
+
+  static Future<int> getXp() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getInt(_xpKey) ?? 0;
+  }
+
+  static Future<int> addXp(int amount) async {
+    final p = await SharedPreferences.getInstance();
+    final current = p.getInt(_xpKey) ?? 0;
+    final next = current + amount;
+    await p.setInt(_xpKey, next);
+    return next;
+  }
+
+  static int levelFromXp(int xp) => (xp ~/ 100) + 1;
+  static double levelProgress(int xp) => (xp % 100) / 100.0;
+  static int xpToNextLevel(int xp) => 100 - (xp % 100);
+
+  static int xpForStreak(int streakDays) {
+    if (streakDays >= 100) return 110;
+    if (streakDays >= 30) return 60;
+    if (streakDays >= 14) return 35;
+    if (streakDays >= 7) return 25;
+    if (streakDays >= 3) return 15;
+    return 10;
+  }
+}
+
+// ─── Confetti Particle ────────────────────────────────────────────────────────
+class _Particle {
+  final double startX;
+  final double vx;
+  final double vy;
+  final double size;
+  final Color color;
+  final double initialRotation;
+  final double rotationSpeed;
+  final bool isRect;
+
+  const _Particle({
+    required this.startX,
+    required this.vx,
+    required this.vy,
+    required this.size,
+    required this.color,
+    required this.initialRotation,
+    required this.rotationSpeed,
+    required this.isRect,
+  });
+}
+
+List<_Particle> _generateParticles(Color primaryColor) {
+  final rng = math.Random();
+  final colors = [
+    primaryColor,
+    const Color(0xFFC8F135),
+    const Color(0xFFFF6B47),
+    const Color(0xFF4DA6FF),
+    const Color(0xFFFFB830),
+    Colors.white,
+    const Color(0xFF8B7FFF),
+    const Color(0xFF00D4A0),
+  ];
+  return List.generate(80, (_) => _Particle(
+    startX: rng.nextDouble(),
+    vx: (rng.nextDouble() - 0.5) * 0.5,
+    vy: rng.nextDouble() * 1.4 + 0.4,
+    size: rng.nextDouble() * 10 + 5,
+    color: colors[rng.nextInt(colors.length)],
+    initialRotation: rng.nextDouble() * math.pi * 2,
+    rotationSpeed: (rng.nextDouble() - 0.5) * 12,
+    isRect: rng.nextBool(),
+  ));
+}
+
+class _ConfettiPainter extends CustomPainter {
+  final double progress;
+  final List<_Particle> particles;
+
+  const _ConfettiPainter({required this.progress, required this.particles});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final p in particles) {
+      final y = -0.05 + p.vy * progress;
+      final x = p.startX + p.vx * progress;
+      final opacity = progress > 0.65
+          ? (1.0 - (progress - 0.65) / 0.35).clamp(0.0, 1.0)
+          : 1.0;
+      if (y > 1.15 || x < -0.1 || x > 1.1) continue;
+
+      final paint = Paint()
+        ..color = p.color.withOpacity(opacity)
+        ..style = PaintingStyle.fill;
+      final cx = x * size.width;
+      final cy = y * size.height;
+
+      canvas.save();
+      canvas.translate(cx, cy);
+      canvas.rotate(p.initialRotation + p.rotationSpeed * progress);
+      if (p.isRect) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(center: Offset.zero, width: p.size, height: p.size * 0.45),
+            const Radius.circular(2),
+          ),
+          paint,
+        );
+      } else {
+        canvas.drawCircle(Offset.zero, p.size / 2, paint);
+      }
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ConfettiPainter old) => old.progress != progress;
+}
+
+// ─── Celebration Overlay ──────────────────────────────────────────────────────
+class _CelebrationOverlay extends StatefulWidget {
+  final Streak streak;
+  final int xpEarned;
+  final int totalXp;
+
+  const _CelebrationOverlay({
+    required this.streak,
+    required this.xpEarned,
+    required this.totalXp,
+  });
+
+  @override
+  State<_CelebrationOverlay> createState() => _CelebrationOverlayState();
+}
+
+class _CelebrationOverlayState extends State<_CelebrationOverlay>
+    with TickerProviderStateMixin {
+  late AnimationController _confettiCtrl;
+  late AnimationController _cardCtrl;
+  late Animation<double> _scaleAnim;
+  late Animation<double> _fadeAnim;
+  late List<_Particle> _particles;
+
+  @override
+  void initState() {
+    super.initState();
+    _particles = _generateParticles(widget.streak.color);
+
+    _confettiCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    )..forward();
+
+    _cardCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 550),
+    );
+    _scaleAnim = CurvedAnimation(parent: _cardCtrl, curve: Curves.elasticOut);
+    _fadeAnim = CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOut);
+    _cardCtrl.forward();
+
+    Future.delayed(const Duration(milliseconds: 3500), () {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  @override
+  void dispose() {
+    _confettiCtrl.dispose();
+    _cardCtrl.dispose();
+    super.dispose();
+  }
+
+  String get _headline {
+    final s = widget.streak.currentStreak;
+    if (s >= 100) return '🏆 LEGENDARY';
+    if (s >= 30)  return '🔥 MONTH MASTER';
+    if (s >= 14)  return '⚡ UNSTOPPABLE';
+    if (s >= 7)   return '✨ WEEK WARRIOR';
+    if (s >= 3)   return '💪 ON A ROLL';
+    if (s == 1)   return '🌱 FIRST FLAME';
+    return '🎯 LOGGED';
+  }
+
+  String get _subtitle {
+    final s = widget.streak.currentStreak;
+    if (s >= 100) return 'A hundred days. You\'re truly legendary.';
+    if (s >= 30)  return 'A full month of showing up. Incredible.';
+    if (s >= 14)  return 'Two solid weeks. This is a real habit now.';
+    if (s >= 7)   return 'A whole week! Your streak is on fire.';
+    if (s >= 3)   return 'Three days strong. The habit is forming.';
+    if (s == 1)   return 'Every legend starts with day one.';
+    return 'Keep showing up every single day.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.of(context).pop(),
+      child: Material(
+        color: Colors.black.withOpacity(0.75),
+        child: Stack(
+          children: [
+            AnimatedBuilder(
+              animation: _confettiCtrl,
+              builder: (ctx2, child) => CustomPaint(
+                painter: _ConfettiPainter(
+                  progress: _confettiCtrl.value,
+                  particles: _particles,
+                ),
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Center(
+              child: ScaleTransition(
+                scale: _scaleAnim,
+                child: FadeTransition(
+                  opacity: _fadeAnim,
+                  child: _buildCard(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCard() {
+    final level = _XpService.levelFromXp(widget.totalXp);
+    final progress = _XpService.levelProgress(widget.totalXp);
+    final toNext = _XpService.xpToNextLevel(widget.totalXp);
+    final color = widget.streak.color;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 36),
+      padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF13131E),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: color.withOpacity(0.35), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.25),
+            blurRadius: 48,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Big streak circle
+          Container(
+            width: 110,
+            height: 110,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withOpacity(0.4), width: 2.5),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '${widget.streak.currentStreak}',
+                  style: TextStyle(
+                    fontSize: 42,
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                    letterSpacing: -2,
+                    height: 1.0,
+                  ),
+                ),
+                Text(
+                  'days',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: color.withOpacity(0.7),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Headline
+          Text(
+            _headline,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 13,
+              color: Colors.white60,
+              height: 1.55,
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // XP earned badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+            decoration: BoxDecoration(
+              color: const Color(0xFFC8F135).withOpacity(0.12),
+              borderRadius: BorderRadius.circular(100),
+              border: Border.all(color: const Color(0xFFC8F135).withOpacity(0.35)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('⚡', style: TextStyle(fontSize: 15)),
+                const SizedBox(width: 6),
+                Text(
+                  '+${widget.xpEarned} XP',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFFC8F135),
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 10),
+                  width: 1,
+                  height: 14,
+                  color: Colors.white12,
+                ),
+                Text(
+                  'Level $level',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Level progress bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(100),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 5,
+              backgroundColor: Colors.white12,
+              valueColor: const AlwaysStoppedAnimation(Color(0xFFC8F135)),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$toNext XP to Level ${level + 1}',
+            style: const TextStyle(fontSize: 10, color: Colors.white30),
+          ),
+          const SizedBox(height: 24),
+
+          // CTA button
+          GestureDetector(
+            onTap: () => Navigator.of(context).pop(),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Text(
+                'KEEP GOING',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.black,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Streaks Storage Service ───────────────────────────────────────────────────
 class StreaksStorageService {
   static const String _key = 'streaks_data';
@@ -144,6 +493,46 @@ class StreaksStorageService {
       final jsonList = jsonDecode(jsonStr) as List;
       final streaks = jsonList.map((json) => _streakFromJson(json)).toList();
       print('✓ Streaks loaded (${streaks.length} streaks)');
+
+      // Auto-advance any streak that hasn't been logged today
+      bool changed = false;
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      for (final streak in streaks) {
+        // Weekly freeze reset
+        if (streak.lastFreezeReset == null ||
+            today.difference(DateTime(streak.lastFreezeReset!.year,
+                streak.lastFreezeReset!.month, streak.lastFreezeReset!.day)).inDays >= 7) {
+          streak.freezesRemaining = 1;
+          streak.frozenThisWeek = false;
+          streak.lastFreezeReset = now;
+          changed = true;
+        }
+
+        // Only break/freeze streaks that were missed — never auto-complete them.
+        // A streak is "missed" if lastLoggedDate was 2+ days ago AND it wasn't
+        // logged today. Opening the app does NOT count as completing the streak.
+        if (!streak.loggedToday && streak.lastLoggedDate != null) {
+          final lastDay = DateTime(streak.lastLoggedDate!.year,
+              streak.lastLoggedDate!.month, streak.lastLoggedDate!.day);
+          final gap = today.difference(lastDay).inDays;
+          if (gap >= 2) {
+            // Missed at least one full day — try freeze first
+            if (streak.freezesRemaining > 0 && !streak.frozenThisWeek) {
+              streak.freezesRemaining--;
+              streak.frozenThisWeek = true;
+              // Streak preserved by freeze — do NOT reset
+            } else {
+              streak.currentStreak = 0;
+            }
+            changed = true;
+          }
+          // gap == 1 means last logged yesterday — streak is intact, waiting for
+          // today's log. Do nothing — user hasn't had their chance yet.
+        }
+      }
+      if (changed) await saveStreaks(streaks);
+
       return streaks;
     } catch (e) {
       print('✗ Error loading streaks: $e');
@@ -162,6 +551,9 @@ class StreaksStorageService {
     'totalCompletions': s.totalCompletions,
     'lastLoggedDate': s.lastLoggedDate?.toIso8601String(),
     'completionHistory': s.completionHistory.map((d) => d.toIso8601String()).toList(),
+    'freezesRemaining': s.freezesRemaining,
+    'frozenThisWeek': s.frozenThisWeek,
+    'lastFreezeReset': s.lastFreezeReset?.toIso8601String(),
   };
 
   static Streak _streakFromJson(Map<String, dynamic> json) {
@@ -172,7 +564,7 @@ class StreaksStorageService {
     return Streak(
       title: json['title'] as String,
       description: json['description'] as String? ?? 'No description',
-      color: Color(json['colorValue'] as int? ?? 0xFFD85A30),
+      color: Color(json['colorValue'] as int? ?? 0xFFFF6B47),
       icon: IconData(json['iconCodePoint'] as int? ?? 0xf57ca, fontFamily: 'MaterialIcons'),
       category: json['category'] as String? ?? 'General',
       currentStreak: json['currentStreak'] as int? ?? 0,
@@ -182,13 +574,19 @@ class StreaksStorageService {
           ? DateTime.parse(json['lastLoggedDate'] as String)
           : null,
       completionHistory: completionHistory,
+      freezesRemaining: json['freezesRemaining'] as int? ?? 1,
+      frozenThisWeek: json['frozenThisWeek'] as bool? ?? false,
+      lastFreezeReset: json['lastFreezeReset'] != null
+          ? DateTime.parse(json['lastFreezeReset'] as String)
+          : null,
     );
   }
 }
 
 // ─── Streaks Screen ───────────────────────────────────────────────────────────
 class StreaksScreen extends StatefulWidget {
-  const StreaksScreen({super.key});
+  final VoidCallback? onBack;
+  const StreaksScreen({super.key, this.onBack});
 
   @override
   State<StreaksScreen> createState() => _StreaksScreenState();
@@ -197,11 +595,18 @@ class StreaksScreen extends StatefulWidget {
 class _StreaksScreenState extends State<StreaksScreen> {
   final List<Streak> _streaks = [];
   bool _isLoading = true;
+  int _totalXp = 0;
 
   @override
   void initState() {
     super.initState();
     _loadStreaks();
+    _loadXp();
+  }
+
+  Future<void> _loadXp() async {
+    final xp = await _XpService.getXp();
+    if (mounted) setState(() => _totalXp = xp);
   }
 
   Future<void> _loadStreaks() async {
@@ -227,23 +632,25 @@ class _StreaksScreenState extends State<StreaksScreen> {
   }
 
   void _deleteStreak(Streak streak) {
+    final t = AppTokens.of(context);
     final index = _streaks.indexOf(streak);
     setState(() => _streaks.remove(streak));
     _saveStreaks();
     Future.delayed(const Duration(milliseconds: 300), () {
+      final t = AppTokens.of(context);
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 3),
           content: Text('"${streak.title}" deleted',
-              style: _T.body(color: Colors.white)),
-          backgroundColor: _T.ink,
+              style: t.body(color: Colors.white)),
+          backgroundColor: t.bg2,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_T.r8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.r8)),
           action: SnackBarAction(
             label: 'Undo',
-            textColor: _T.coral,
+            textColor: t.accent,
             onPressed: () {
               setState(() => _streaks.insert(index, streak));
               _saveStreaks();
@@ -336,32 +743,58 @@ class _StreaksScreenState extends State<StreaksScreen> {
   }
 
   void _logDay(Streak s) {
-  setState(() {
-    final now = DateTime.now();
-    if (!s.loggedToday) {
-      if (s.currentStreak == 0) {
-        // First time logging - initialize streak to 1
-        s.currentStreak = 1;
-        s.longestStreak = 1;
-      } else {
+    if (s.loggedToday) return;
+    setState(() {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      bool continuing = false;
+      if (s.lastLoggedDate != null) {
+        final lastDay = DateTime(s.lastLoggedDate!.year,
+            s.lastLoggedDate!.month, s.lastLoggedDate!.day);
+        final gap = today.difference(lastDay).inDays;
+        continuing = gap <= 1 && s.currentStreak > 0;
+      }
+      if (continuing) {
         s.currentStreak++;
-        if (s.currentStreak > s.longestStreak) {
-          s.longestStreak = s.currentStreak;
-        }
+      } else {
+        s.currentStreak = 1;
+      }
+      if (s.currentStreak > s.longestStreak) {
+        s.longestStreak = s.currentStreak;
       }
       s.totalCompletions++;
       s.lastLoggedDate = now;
       s.completionHistory.add(now);
-    }
-  });
-  _saveStreaks();
-}
+    });
+    _saveStreaks();
+    _showCelebration(s);
+  }
+
+  Future<void> _showCelebration(Streak s) async {
+    final xpEarned = _XpService.xpForStreak(s.currentStreak);
+    final totalXp = await _XpService.addXp(xpEarned);
+    if (mounted) setState(() => _totalXp = totalXp);
+    if (!mounted) return;
+    await showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'celebration',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (ctx, a1, a2) => _CelebrationOverlay(
+        streak: s,
+        xpEarned: xpEarned,
+        totalXp: totalXp,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     if (_isLoading) {
       return Scaffold(
-        backgroundColor: _T.canvas,
+        backgroundColor: t.bg,
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -369,14 +802,14 @@ class _StreaksScreenState extends State<StreaksScreen> {
               Container(
                 width: 60, height: 60,
                 decoration: BoxDecoration(
-                  color: _T.coralBg,
-                  borderRadius: BorderRadius.circular(_T.r16),
-                  border: Border.all(color: _T.coralBorder),
+                  color: AppTokens.coral.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(AppTokens.r16),
+                  border: Border.all(color: t.border),
                 ),
-                child: const Icon(Icons.local_fire_department_outlined, color: _T.coral, size: 28),
+                child: const Icon(Icons.local_fire_department_outlined, color: AppTokens.coral, size: 28),
               ),
-              const SizedBox(height: _T.s16),
-              Text('Loading streaks...', style: _T.body(size: 14)),
+              const SizedBox(height: AppTokens.s16),
+              Text('Loading streaks...', style: t.body(size: 14)),
             ],
           ),
         ),
@@ -392,32 +825,38 @@ class _StreaksScreenState extends State<StreaksScreen> {
         : _streaks.map((s) => s.longestStreak).reduce((a, b) => a > b ? a : b);
 
     return Scaffold(
-      backgroundColor: _T.canvas,
+      backgroundColor: t.bg,
       appBar: AppBar(
-        backgroundColor: _T.surface,
+        backgroundColor: t.bg,
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: _T.ink, size: 18),
-          onPressed: () => Navigator.of(context).maybePop(),
+          icon: Icon(Icons.arrow_back_ios, color: t.txt, size: 18),
+          onPressed: () {
+            if (widget.onBack != null) {
+              widget.onBack!();
+            } else {
+              Navigator.of(context).maybePop();
+            }
+          },
         ),
         centerTitle: true,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             _LogoMark(size: 22),
-            const SizedBox(width: _T.s8),
+            const SizedBox(width: AppTokens.s8),
             Text('Streaks',
                 style: TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: _T.ink,
+                    fontWeight: FontWeight.w700,
+                    color: t.txt,
                     letterSpacing: -0.4)),
           ],
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, thickness: 1, color: _T.border),
+          child: Divider(height: 1, thickness: 1, color: t.border),
         ),
         actions: [
           Padding(
@@ -433,6 +872,7 @@ class _StreaksScreenState extends State<StreaksScreen> {
   }
 
   Widget _buildEmpty() {
+    final t = AppTokens.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
@@ -442,22 +882,22 @@ class _StreaksScreenState extends State<StreaksScreen> {
             Container(
               width: 72, height: 72,
               decoration: BoxDecoration(
-                color: _T.coralBg,
-                borderRadius: BorderRadius.circular(_T.r16),
-                border: Border.all(color: _T.coralBorder),
+                color: AppTokens.coral.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(AppTokens.r16),
+                border: Border.all(color: t.border),
               ),
               child: const Icon(Icons.local_fire_department_outlined,
-                  color: _T.coral, size: 32),
+                  color: AppTokens.coral, size: 32),
             ),
-            const SizedBox(height: _T.s20),
-            Text('No streaks yet', style: _T.heading(size: 22)),
-            const SizedBox(height: _T.s8),
+            const SizedBox(height: AppTokens.s20),
+            Text('No streaks yet', style: t.heading(size: 22)),
+            const SizedBox(height: AppTokens.s8),
             Text(
               'Tap "Add" to create your first streak and start building consistency.',
               textAlign: TextAlign.center,
-              style: _T.body(size: 14),
+              style: t.body(size: 14),
             ),
-            const SizedBox(height: _T.s32),
+            const SizedBox(height: AppTokens.s32),
             _PrimaryBtn(label: 'Add your first streak', onTap: _openAdd),
           ],
         ),
@@ -466,16 +906,17 @@ class _StreaksScreenState extends State<StreaksScreen> {
   }
 
   Widget _buildList(List<Streak> active, List<Streak> notStarted, int bestStreak) {
+    final t = AppTokens.of(context);
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _SummaryStrip(active: active.length, bestStreak: bestStreak),
-          Divider(height: 1, thickness: 1, color: _T.border),
+          _SummaryStrip(active: active.length, bestStreak: bestStreak, totalXp: _totalXp),
+          Divider(height: 1, thickness: 1, color: t.border),
 
           if (active.isNotEmpty) ...[
-            _SectionHeader(label: 'On Fire', accent: _T.coral, bg: _T.coralBg, border: _T.coralBorder, dot: _T.coral),
-            _TopStreakCard(
+            _SectionHeader(label: 'On Fire', accent: AppTokens.coral),
+            AppTokensopStreakCard(
               streak: active.first,
               onEdit: () => _openEdit(active.first),
               onDelete: () => _confirmDelete(active.first),
@@ -485,7 +926,7 @@ class _StreaksScreenState extends State<StreaksScreen> {
           ],
 
           if (active.length > 1) ...[
-            _SectionHeader(label: 'Active Streaks', accent: _T.coral, bg: _T.coralBg, border: _T.coralBorder, dot: _T.coral),
+            _SectionHeader(label: 'Active Streaks', accent: AppTokens.coral),
             ...active.skip(1).map((s) => _SwipeCard(
               key: ValueKey(s.hashCode),
               streak: s,
@@ -497,14 +938,14 @@ class _StreaksScreenState extends State<StreaksScreen> {
           ],
 
           if (_streaks.isNotEmpty) ...[
-            Divider(height: 1, thickness: 1, color: _T.border),
-            _SectionHeader(label: 'This Week', accent: _T.purple, bg: _T.purpleBg, border: _T.purpleBorder, dot: _T.purple),
+            Divider(height: 1, thickness: 1, color: t.border),
+            _SectionHeader(label: 'This Week', accent: AppTokens.purple),
             _WeeklyOverview(streaks: _streaks),
           ],
 
           if (notStarted.isNotEmpty) ...[
-            Divider(height: 1, thickness: 1, color: _T.border),
-            _SectionHeader(label: 'Not Started', accent: _T.ink3, bg: _T.canvas, border: _T.border, dot: _T.ink3),
+            Divider(height: 1, thickness: 1, color: t.border),
+            _SectionHeader(label: 'Not Started', accent: t.txt3),
             ...notStarted.map((s) => _SwipeCard(
               key: ValueKey(s.hashCode),
               streak: s,
@@ -524,37 +965,69 @@ class _StreaksScreenState extends State<StreaksScreen> {
 
 // ─── Summary Strip ────────────────────────────────────────────────────────────
 class _SummaryStrip extends StatelessWidget {
-  final int active, bestStreak;
-  const _SummaryStrip({required this.active, required this.bestStreak});
+  final int active, bestStreak, totalXp;
+  const _SummaryStrip({required this.active, required this.bestStreak, required this.totalXp});
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final level = _XpService.levelFromXp(totalXp);
+    final progress = _XpService.levelProgress(totalXp);
+
     return Container(
-      color: _T.surface,
-      child: IntrinsicHeight(
-        child: Row(
-          children: [
-            Expanded(child: _SummaryCell(
-              icon: Icons.local_fire_department_outlined,
-              value: '$active',
-              label: 'Active',
-              iconBg: _T.coralBg,
-              iconColor: _T.coral,
-              valueColor: _T.coralDark,
-              labelColor: _T.coral,
-            )),
-            VerticalDivider(width: 1, thickness: 1, color: _T.border),
-            Expanded(child: _SummaryCell(
-              icon: Icons.emoji_events_outlined,
-              value: '${bestStreak}d',
-              label: 'Best Streak',
-              iconBg: _T.purpleBg,
-              iconColor: _T.purple,
-              valueColor: _T.purpleDeep,
-              labelColor: _T.purple,
-            )),
-          ],
-        ),
+      color: t.bg2,
+      child: Column(
+        children: [
+          IntrinsicHeight(
+            child: Row(
+              children: [
+                Expanded(child: _SummaryCell(
+                  icon: Icons.local_fire_department_outlined,
+                  value: '$active',
+                  label: 'Active',
+                  iconColor: AppTokens.coral,
+                )),
+                VerticalDivider(width: 1, thickness: 1, color: t.border),
+                Expanded(child: _SummaryCell(
+                  icon: Icons.emoji_events_outlined,
+                  value: '${bestStreak}d',
+                  label: 'Best Streak',
+                  iconColor: AppTokens.purple,
+                )),
+                VerticalDivider(width: 1, thickness: 1, color: t.border),
+                Expanded(child: _SummaryCell(
+                  icon: Icons.bolt_outlined,
+                  value: 'Lv $level',
+                  label: '$totalXp XP',
+                  iconColor: const Color(0xFFC8F135),
+                )),
+              ],
+            ),
+          ),
+          // XP progress bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(100),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 4,
+                    backgroundColor: t.bg3,
+                    valueColor: const AlwaysStoppedAnimation(Color(0xFFC8F135)),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${_XpService.xpToNextLevel(totalXp)} XP to Level ${level + 1}',
+                  style: t.label(size: 10, color: t.txt3),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -563,15 +1036,15 @@ class _SummaryStrip extends StatelessWidget {
 class _SummaryCell extends StatelessWidget {
   final IconData icon;
   final String value, label;
-  final Color iconBg, iconColor, valueColor, labelColor;
+  final Color iconColor;
   const _SummaryCell({
     required this.icon, required this.value, required this.label,
-    required this.iconBg, required this.iconColor,
-    required this.valueColor, required this.labelColor,
+    required this.iconColor,
   });
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: Column(
@@ -581,18 +1054,20 @@ class _SummaryCell extends StatelessWidget {
           Container(
             width: 38, height: 38,
             decoration: BoxDecoration(
-                color: iconBg, borderRadius: BorderRadius.circular(_T.r8)),
+                color: iconColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(AppTokens.r8),
+                border: Border.all(color: iconColor.withOpacity(0.25))),
             child: Icon(icon, size: 17, color: iconColor),
           ),
-          const SizedBox(height: _T.s12),
+          const SizedBox(height: AppTokens.s12),
           Text(value,
               style: TextStyle(
                   fontSize: 28,
-                  fontWeight: FontWeight.w500,
-                  color: valueColor,
+                  fontWeight: FontWeight.w700,
+                  color: t.txt,
                   letterSpacing: -1.2)),
           const SizedBox(height: 3),
-          Text(label, style: _T.label(size: 11, color: labelColor)),
+          Text(label, style: t.label(size: 11, color: iconColor)),
         ],
       ),
     );
@@ -602,25 +1077,23 @@ class _SummaryCell extends StatelessWidget {
 // ─── Section Header ────────────────────────────────────────────────────────────
 class _SectionHeader extends StatelessWidget {
   final String label;
-  final Color accent, bg, border, dot;
+  final Color accent;
   const _SectionHeader({
     required this.label,
     required this.accent,
-    required this.bg,
-    required this.border,
-    required this.dot,
   });
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     return Container(
-      color: _T.canvas,
+      color: t.bg,
       padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
       child: _EyebrowPill(
         label: label.toUpperCase(),
-        bg: bg,
-        border: border,
-        dot: dot,
+        bg: accent.withOpacity(0.1),
+        border: accent.withOpacity(0.25),
+        dot: accent,
         text: accent,
       ),
     );
@@ -647,10 +1120,10 @@ class _SwipeCard extends StatelessWidget {
     return Dismissible(
       key: ValueKey('dismiss_${streak.hashCode}'),
       background: _SwipeBg(
-          color: _T.blue, icon: Icons.edit_outlined,
+          color: AppTokens.blue, icon: Icons.edit_outlined,
           label: 'Edit', alignment: Alignment.centerLeft),
       secondaryBackground: _SwipeBg(
-          color: _T.coral, icon: Icons.delete_outline,
+          color: AppTokens.coral, icon: Icons.delete_outline,
           label: 'Delete', alignment: Alignment.centerRight),
       confirmDismiss: (dir) async {
         if (dir == DismissDirection.startToEnd) {
@@ -677,10 +1150,11 @@ class _SwipeBg extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final isLeft = alignment == Alignment.centerLeft;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(_T.r12)),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(AppTokens.r12)),
       alignment: alignment,
       padding: EdgeInsets.only(left: isLeft ? 20 : 0, right: isLeft ? 0 : 20),
       child: Column(
@@ -688,7 +1162,7 @@ class _SwipeBg extends StatelessWidget {
         children: [
           Icon(icon, color: Colors.white, size: 20),
           const SizedBox(height: 4),
-          Text(label, style: _T.label(size: 11, color: Colors.white)),
+          Text(label, style: t.label(size: 11, color: Colors.white)),
         ],
       ),
     );
@@ -696,12 +1170,12 @@ class _SwipeBg extends StatelessWidget {
 }
 
 // ─── Top Streak Hero Card ──────────────────────────────────────────────────────
-class _TopStreakCard extends StatelessWidget {
+class AppTokensopStreakCard extends StatelessWidget {
   final Streak streak;
   final VoidCallback? onLogDay;
   final VoidCallback onEdit, onDelete, onLongPress;
 
-  const _TopStreakCard({
+  const AppTokensopStreakCard({
     required this.streak,
     required this.onLogDay,
     required this.onEdit,
@@ -711,14 +1185,20 @@ class _TopStreakCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: GestureDetector(
         onLongPress: onLongPress,
         child: Container(
           decoration: BoxDecoration(
-            color: _T.ink,
-            borderRadius: BorderRadius.circular(_T.r16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [streak.color.withOpacity(0.15), t.bg2],
+            ),
+            borderRadius: BorderRadius.circular(AppTokens.r16),
+            border: Border.all(color: streak.color.withOpacity(0.25)),
           ),
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -729,41 +1209,41 @@ class _TopStreakCard extends StatelessWidget {
                   Container(
                     width: 48, height: 48,
                     decoration: BoxDecoration(
-                        color: streak.color.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(_T.r8),
+                        color: streak.color.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(AppTokens.r8),
                         border: Border.all(color: streak.color.withOpacity(0.4))),
                     child: Icon(streak.icon, color: streak.color, size: 22),
                   ),
-                  const SizedBox(width: _T.s12),
+                  const SizedBox(width: AppTokens.s12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(streak.title,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                color: _T.surface,
+                                fontWeight: FontWeight.w700,
+                                color: t.txt,
                                 letterSpacing: -0.4)),
                         const SizedBox(height: 3),
                         Text(streak.category,
-                            style: _T.label(size: 11, color: const Color(0xFF888888))),
+                            style: t.label(size: 11, color: t.txt3)),
                       ],
                     ),
                   ),
                   _IconActionBtn(icon: Icons.edit_outlined, onTap: onEdit),
-                  const SizedBox(width: _T.s8),
+                  const SizedBox(width: AppTokens.s8),
                   _IconActionBtn(icon: Icons.delete_outline, onTap: onDelete),
                 ],
               ),
 
-              const SizedBox(height: _T.s24),
+              const SizedBox(height: AppTokens.s24),
 
               Row(children: [
                 _HeroBadge(value: '${streak.currentStreak}d', sub: 'current'),
-                const SizedBox(width: _T.s8),
+                const SizedBox(width: AppTokens.s8),
                 _HeroBadge(value: '${streak.longestStreak}d', sub: 'best'),
-                const SizedBox(width: _T.s8),
+                const SizedBox(width: AppTokens.s8),
                 _HeroBadge(value: '${streak.totalCompletions}', sub: 'total'),
                 const Spacer(),
                 Column(
@@ -773,16 +1253,16 @@ class _TopStreakCard extends StatelessWidget {
                     Text('${streak.currentStreak}',
                         style: TextStyle(
                             fontSize: 28,
-                            fontWeight: FontWeight.w500,
+                            fontWeight: FontWeight.w700,
                             color: streak.color,
                             letterSpacing: -1.2)),
                     Text('days',
-                        style: _T.label(size: 10, color: const Color(0xFF888888))),
+                        style: t.label(size: 10, color: t.txt3)),
                   ],
                 ),
               ]),
 
-              const SizedBox(height: _T.s16),
+              const SizedBox(height: AppTokens.s16),
 
               GestureDetector(
                 onTap: onLogDay,
@@ -791,9 +1271,9 @@ class _TopStreakCard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   decoration: BoxDecoration(
                     color: streak.loggedToday
-                        ? const Color(0xFF2A2A2A)
+                        ? t.bg3
                         : streak.color,
-                    borderRadius: BorderRadius.circular(_T.r8),
+                    borderRadius: BorderRadius.circular(AppTokens.r8),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -805,16 +1285,16 @@ class _TopStreakCard extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w700,
                           letterSpacing: -0.2,
                           color: streak.loggedToday
-                              ? const Color(0xFF555555)
-                              : Colors.white,
+                              ? t.txt3
+                              : Colors.black,
                         ),
                       ),
                       if (!streak.loggedToday) ...[
-                        const SizedBox(width: _T.s8),
-                        const Icon(Icons.arrow_forward, size: 12, color: Colors.white),
+                        const SizedBox(width: AppTokens.s8),
+                        const Icon(Icons.arrow_forward, size: 12, color: Colors.black),
                       ],
                     ],
                   ),
@@ -833,19 +1313,23 @@ class _HeroBadge extends StatelessWidget {
   const _HeroBadge({required this.value, required this.sub});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E),
-            borderRadius: BorderRadius.circular(_T.r8)),
+            color: t.bg3,
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            border: Border.all(color: t.border)),
         child: Column(children: [
           Text(value,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w500, color: _T.surface)),
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w700, color: t.txt)),
           const SizedBox(height: 2),
-          Text(sub, style: _T.label(size: 9, color: const Color(0xFF666666))),
+          Text(sub, style: t.label(size: 9, color: t.txt3)),
         ]),
       );
+  }
 }
 
 class _IconActionBtn extends StatelessWidget {
@@ -854,16 +1338,20 @@ class _IconActionBtn extends StatelessWidget {
   const _IconActionBtn({required this.icon, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(_T.r8)),
-          child: Icon(icon, color: const Color(0xFF888888), size: 15),
+              color: t.bg3,
+              borderRadius: BorderRadius.circular(AppTokens.r8),
+              border: Border.all(color: t.border)),
+          child: Icon(icon, color: t.txt2, size: 15),
         ),
       );
+  }
 }
 
 // ─── Regular Streak Card ───────────────────────────────────────────────────────
@@ -881,6 +1369,7 @@ class _StreakCardState extends State<_StreakCard> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final streak = widget.streak;
 
     return MouseRegion(
@@ -890,9 +1379,9 @@ class _StreakCardState extends State<_StreakCard> {
         duration: const Duration(milliseconds: 180),
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         decoration: BoxDecoration(
-          color: _hovered ? const Color(0xFFF5F4F1) : _T.surface,
-          borderRadius: BorderRadius.circular(_T.r12),
-          border: Border.all(color: _T.border),
+          color: _hovered ? t.bg3 : t.bg2,
+          borderRadius: BorderRadius.circular(AppTokens.r12),
+          border: Border.all(color: _hovered ? streak.color.withOpacity(0.4) : t.border),
         ),
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -903,12 +1392,12 @@ class _StreakCardState extends State<_StreakCard> {
               width: 40, height: 40,
               decoration: BoxDecoration(
                 color: _hovered ? streak.color : streak.color.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(_T.r8),
+                borderRadius: BorderRadius.circular(AppTokens.r8),
               ),
               child: Icon(streak.icon,
                   color: _hovered ? Colors.white : streak.color, size: 20),
             ),
-            const SizedBox(width: _T.s12),
+            const SizedBox(width: AppTokens.s12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -916,51 +1405,76 @@ class _StreakCardState extends State<_StreakCard> {
                   Row(children: [
                     Expanded(
                       child: Text(streak.title,
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: _T.ink,
+                              fontWeight: FontWeight.w700,
+                              color: t.txt,
                               letterSpacing: -0.3)),
                     ),
+                    if (streak.frozenThisWeek)
+                      Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4DA6FF).withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(100),
+                          border: Border.all(color: const Color(0xFF4DA6FF).withOpacity(0.3)),
+                        ),
+                        child: const Text('❄️ Frozen',
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500,
+                                color: Color(0xFF4DA6FF))),
+                      )
+                    else if (streak.freezesRemaining > 0)
+                      Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4DA6FF).withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(100),
+                          border: Border.all(color: const Color(0xFF4DA6FF).withOpacity(0.2)),
+                        ),
+                        child: const Text('❄️ 1 freeze',
+                            style: TextStyle(fontSize: 10, color: Color(0xFF4DA6FF))),
+                      ),
                     Text('${streak.streakEmoji} ${streak.currentStreak}d',
                         style: TextStyle(
                             fontSize: 12,
-                            fontWeight: FontWeight.w500,
+                            fontWeight: FontWeight.w700,
                             color: streak.color,
                             letterSpacing: -0.2)),
                   ]),
                   const SizedBox(height: 3),
-                  Text(streak.description, style: _T.body(size: 12)),
-                  const SizedBox(height: _T.s12),
+                  Text(streak.description, style: t.body(size: 12)),
+                  const SizedBox(height: AppTokens.s12),
                   _WeekDots(streak: streak),
-                  const SizedBox(height: _T.s8),
+                  const SizedBox(height: AppTokens.s8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text('Best: ${streak.longestStreak}d · Total: ${streak.totalCompletions}',
-                          style: _T.label(size: 11)),
+                          style: t.label(size: 11)),
                       GestureDetector(
                         onTap: streak.loggedToday ? null : widget.onLogDay,
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color: streak.loggedToday
-                                ? _T.canvas
-                                : streak.color.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(_T.r100),
+                                ? t.bg3
+                                : streak.color.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(AppTokens.r100),
                             border: Border.all(
                               color: streak.loggedToday
-                                  ? _T.border
+                                  ? t.border
                                   : streak.color.withOpacity(0.3),
                             ),
                           ),
                           child: streak.loggedToday
                               ? Text(
                                   streak.nextLogAvailable.isEmpty ? 'Logged ✓' : streak.nextLogAvailable,
-                                  style: _T.label(size: 10, color: _T.ink3))
+                                  style: t.label(size: 10, color: t.txt3))
                               : Text(
                                   streak.currentStreak == 0 ? '🔄 Start' : '+ Log Day',
-                                  style: _T.label(size: 10, color: streak.color)),
+                                  style: t.label(size: 10, color: streak.color)),
                         ),
                       ),
                     ],
@@ -982,6 +1496,7 @@ class _WeekDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final now = DateTime.now();
     final days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     final weekday = now.weekday;
@@ -1000,11 +1515,11 @@ class _WeekDots extends StatelessWidget {
 
         Color dotColor;
         if (isFuture) {
-          dotColor = _T.canvas;
+          dotColor = t.bg3;
         } else if (isCompleted || isToday) {
           dotColor = streak.color;
         } else {
-          dotColor = _T.border;
+          dotColor = t.border;
         }
 
         return Expanded(
@@ -1019,9 +1534,9 @@ class _WeekDots extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(days[i],
-                  style: _T.label(
+                  style: t.label(
                       size: 9,
-                      color: isFuture ? _T.canvas : _T.ink3)),
+                      color: isFuture ? t.txt3 : t.txt2)),
             ],
           ),
         );
@@ -1037,6 +1552,7 @@ class _WeeklyOverview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final now = DateTime.now();
     final weekday = now.weekday;
     final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1045,9 +1561,9 @@ class _WeeklyOverview extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Container(
         decoration: BoxDecoration(
-            color: _T.surface,
-            borderRadius: BorderRadius.circular(_T.r16),
-            border: Border.all(color: _T.border)),
+            color: t.bg2,
+            borderRadius: BorderRadius.circular(AppTokens.r16),
+            border: Border.all(color: t.border)),
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1056,24 +1572,24 @@ class _WeeklyOverview extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('Weekly Progress',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: _T.ink,
+                        fontWeight: FontWeight.w700,
+                        color: t.txt,
                         letterSpacing: -0.3)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                      color: _T.purpleBg,
-                      borderRadius: BorderRadius.circular(_T.r100),
-                      border: Border.all(color: _T.purpleBorder)),
+                      color: AppTokens.purple.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(AppTokens.r100),
+                      border: Border.all(color: AppTokens.purple.withOpacity(0.25))),
                   child: Text(
                       '${streaks.length} habit${streaks.length == 1 ? '' : 's'}',
-                      style: _T.label(size: 10, color: _T.purple)),
+                      style: t.label(size: 10, color: AppTokens.purple)),
                 ),
               ],
             ),
-            const SizedBox(height: _T.s20),
+            const SizedBox(height: AppTokens.s20),
             Row(
               children: List.generate(7, (i) {
                 final dayOffset = i + 1 - weekday;
@@ -1102,9 +1618,9 @@ class _WeeklyOverview extends StatelessWidget {
                         Container(
                           height: 56,
                           decoration: BoxDecoration(
-                              color: _T.canvas,
-                              borderRadius: BorderRadius.circular(_T.r8),
-                              border: Border.all(color: _T.border)),
+                              color: t.bg3,
+                              borderRadius: BorderRadius.circular(AppTokens.r8),
+                              border: Border.all(color: t.border)),
                           alignment: Alignment.bottomCenter,
                           clipBehavior: Clip.hardEdge,
                           child: isFuture
@@ -1113,27 +1629,27 @@ class _WeeklyOverview extends StatelessWidget {
                                   heightFactor: pct == 0 ? 0.04 : pct,
                                   child: Container(
                                     decoration: BoxDecoration(
-                                        color: isToday ? _T.purple : _T.coral,
-                                        borderRadius: BorderRadius.circular(_T.r8)),
+                                        color: isToday ? AppTokens.purple : AppTokens.coral,
+                                        borderRadius: BorderRadius.circular(AppTokens.r8)),
                                   ),
                                 ),
                         ),
                         const SizedBox(height: 6),
                         Text(days[i].substring(0, 1),
-                            style: _T.label(
+                            style: t.label(
                                 size: 10,
-                                color: isToday ? _T.purple : _T.ink3)),
+                                color: isToday ? AppTokens.purple : t.txt3)),
                       ],
                     ),
                   ),
                 );
               }),
             ),
-            const SizedBox(height: _T.s16),
+            const SizedBox(height: AppTokens.s16),
             Row(children: [
-              _LegendDot(color: _T.coral, label: 'Past days'),
-              const SizedBox(width: _T.s16),
-              _LegendDot(color: _T.purple, label: 'Today'),
+              _LegendDot(color: AppTokens.coral, label: 'Past days'),
+              const SizedBox(width: AppTokens.s16),
+              _LegendDot(color: AppTokens.purple, label: 'Today'),
             ]),
           ],
         ),
@@ -1148,15 +1664,18 @@ class _LegendDot extends StatelessWidget {
   const _LegendDot({required this.color, required this.label});
 
   @override
-  Widget build(BuildContext context) => Row(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Row(
         children: [
           Container(
               width: 8, height: 8,
               decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
           const SizedBox(width: 6),
-          Text(label, style: _T.label(size: 11)),
+          Text(label, style: t.label(size: 11)),
         ],
       );
+  }
 }
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
@@ -1165,18 +1684,21 @@ class _LogoMark extends StatelessWidget {
   const _LogoMark({required this.size});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
         width: size, height: size,
         decoration: BoxDecoration(
-            color: _T.ink,
+            color: t.accent,
             borderRadius: BorderRadius.circular(size * 0.22)),
         child: Center(
           child: Container(
             width: size * 0.30, height: size * 0.30,
-            decoration: const BoxDecoration(color: _T.surface, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: t.bg, shape: BoxShape.circle),
           ),
         ),
       );
+  }
 }
 
 class _EyebrowPill extends StatelessWidget {
@@ -1196,7 +1718,7 @@ class _EyebrowPill extends StatelessWidget {
         decoration: BoxDecoration(
             color: bg,
             border: Border.all(color: border),
-            borderRadius: BorderRadius.circular(_T.r100)),
+            borderRadius: BorderRadius.circular(AppTokens.r100)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Container(
               width: 6, height: 6,
@@ -1205,7 +1727,7 @@ class _EyebrowPill extends StatelessWidget {
           Text(label,
               style: TextStyle(
                   fontSize: 10,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w700,
                   color: text,
                   letterSpacing: 0.6)),
         ]),
@@ -1224,7 +1746,9 @@ class _AddBtnState extends State<_AddBtn> {
   bool _pressed = false;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) {
           setState(() => _pressed = false);
@@ -1237,12 +1761,13 @@ class _AddBtnState extends State<_AddBtn> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
             decoration: BoxDecoration(
-                color: _T.ink,
-                borderRadius: BorderRadius.circular(_T.r8)),
-            child: Text('Add', style: _T.label(size: 12, color: _T.surface)),
+                color: t.accent,
+                borderRadius: BorderRadius.circular(AppTokens.r8)),
+            child: Text('Add', style: t.label(size: 12, color: t.bg)),
           ),
         ),
       );
+  }
 }
 
 class _PrimaryBtn extends StatefulWidget {
@@ -1258,7 +1783,9 @@ class _PrimaryBtnState extends State<_PrimaryBtn> {
   bool _pressed = false;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return GestureDetector(
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) {
           setState(() => _pressed = false);
@@ -1271,23 +1798,24 @@ class _PrimaryBtnState extends State<_PrimaryBtn> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
             decoration: BoxDecoration(
-                color: _T.ink, borderRadius: BorderRadius.circular(_T.r8)),
+                color: t.accent, borderRadius: BorderRadius.circular(AppTokens.r8)),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(widget.label,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: _T.surface,
+                        fontWeight: FontWeight.w700,
+                        color: t.bg,
                         letterSpacing: -0.3)),
-                const SizedBox(width: _T.s8),
-                const Icon(Icons.arrow_forward, size: 13, color: _T.surface),
+                const SizedBox(width: AppTokens.s8),
+                Icon(Icons.arrow_forward, size: 13, color: t.bg),
               ],
             ),
           ),
         ),
       );
+  }
 }
 
 // ─── New / Edit Streak Bottom Sheet ──────────────────────────────────────────
@@ -1309,10 +1837,12 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
   bool get _isEdit => widget.existing != null;
 
   static const List<Color> _colors = [
-    Color(0xFFEF4444), Color(0xFFF97316), Color(0xFFF59E0B),
-    Color(0xFF22C55E), Color(0xFF10B981), Color(0xFF3B82F6),
-    Color(0xFF8B5CF6), Color(0xFFA855F7), Color(0xFFEC4899),
-    Color(0xFF06B6D4), Color(0xFF14B8A6), Color(0xFF64748B),
+    Color(0xFF8B7FFF), // Purple
+    Color(0xFFFF6B47), // Coral
+    Color(0xFF00D4A0), // Teal
+    Color(0xFF4DA6FF), // Blue
+    Color(0xFFFFB830), // Amber
+    Color(0xFFC8F135), // Lime
   ];
 
   static const List<IconData> _icons = [
@@ -1375,13 +1905,14 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
   }
 
   void _pickCategory() {
+    final t = AppTokens.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: _T.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: t.bg2,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1390,7 +1921,7 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
               margin: const EdgeInsets.only(top: 10),
               width: 36, height: 4,
               decoration: BoxDecoration(
-                  color: _T.border, borderRadius: BorderRadius.circular(2)),
+                  color: t.border, borderRadius: BorderRadius.circular(2)),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1399,18 +1930,18 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                 children: [
                   const SizedBox(width: 60),
                   Text('Category',
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w500, color: _T.ink)),
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700, color: t.txt)),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
                     child: Text('Done',
                         style: TextStyle(
-                            color: _T.purple, fontSize: 14, fontWeight: FontWeight.w500)),
+                            color: t.accent, fontSize: 14, fontWeight: FontWeight.w700)),
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, thickness: 1, color: _T.border),
+            Divider(height: 1, thickness: 1, color: t.border),
             ConstrainedBox(
               constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
               child: SingleChildScrollView(
@@ -1425,12 +1956,12 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(cat, style: _T.body(size: 15, color: _T.ink)),
-                              if (_category == cat) const Icon(Icons.check, color: _T.purple, size: 18),
+                              Text(cat, style: t.body(size: 15, color: t.txt)),
+                              if (_category == cat) Icon(Icons.check, color: t.accent, size: 18),
                             ],
                           ),
                         ),
-                        if (cat != _categories.last) Divider(height: 1, indent: 16, thickness: 1, color: _T.border),
+                        if (cat != _categories.last) Divider(height: 1, indent: 16, thickness: 1, color: t.border),
                       ]),
                     ),
                   )).toList(),
@@ -1445,13 +1976,15 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
   }
 
   void _save() {
+    final t = AppTokens.of(context);
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
+      final t = AppTokens.of(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Please enter a name', style: _T.body(color: Colors.white)),
-        backgroundColor: _T.ink,
+        content: Text('Please enter a name', style: t.body(color: Colors.white)),
+        backgroundColor: t.bg2,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_T.r8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.r8)),
       ));
       return;
     }
@@ -1472,22 +2005,23 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     final accent = _colors[_selectedColorIndex];
 
     return Container(
       margin: const EdgeInsets.only(top: 60),
-      decoration: const BoxDecoration(
-        color: _T.canvas,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      decoration: BoxDecoration(
+        color: t.bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       child: Column(
         children: [
           Container(
-            decoration: const BoxDecoration(
-              color: _T.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              border: Border(bottom: BorderSide(color: _T.border, width: 1)),
+            decoration: BoxDecoration(
+              color: t.bg2,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              border: Border(bottom: BorderSide(color: t.border, width: 1)),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
@@ -1497,18 +2031,18 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                        border: Border.all(color: _T.border),
-                        borderRadius: BorderRadius.circular(_T.r8)),
-                    child: Text('Cancel', style: _T.body(size: 13)),
+                        border: Border.all(color: t.border),
+                        borderRadius: BorderRadius.circular(AppTokens.r8)),
+                    child: Text('Cancel', style: t.body(size: 13)),
                   ),
                 ),
                 Expanded(
                   child: Text(
                     _isEdit ? 'Edit Streak' : 'New Streak',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w500,
-                        color: _T.ink, letterSpacing: -0.3),
+                    style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700,
+                        color: t.txt, letterSpacing: -0.3),
                   ),
                 ),
                 const SizedBox(width: 70),
@@ -1524,68 +2058,70 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    color: _T.surface,
+                    color: t.bg2,
                     padding: const EdgeInsets.fromLTRB(16, 28, 16, 28),
                     child: Center(
                       child: Container(
                         width: 72, height: 72,
                         decoration: BoxDecoration(
                           color: accent.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(_T.r16),
-                          border: Border.all(color: accent.withOpacity(0.3)),
+                          borderRadius: BorderRadius.circular(AppTokens.r16),
+                          border: Border.all(color: accent.withOpacity(0.25)),
                         ),
                         child: Icon(_icons[_selectedIconIndex], color: accent, size: 32),
                       ),
                     ),
                   ),
-                  Divider(height: 1, thickness: 1, color: _T.border),
-                  const SizedBox(height: _T.s16),
+                  Divider(height: 1, thickness: 1, color: t.border),
+                  const SizedBox(height: AppTokens.s16),
 
                   _FormSection(label: 'Name', child: TextField(
                     controller: _nameCtrl,
                     textCapitalization: TextCapitalization.words,
+                    style: t.body(color: t.txt),
                     decoration: _inputDeco('e.g. Morning Run'),
                   )),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
 
                   _FormSection(label: 'Description', child: TextField(
                     controller: _descCtrl,
                     maxLines: 2,
+                    style: t.body(color: t.txt),
                     decoration: _inputDeco('What does this habit involve?'),
                   )),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
 
                   GestureDetector(
                     onTap: _pickCategory,
                     child: Container(
-                      color: _T.surface,
+                      color: t.bg2,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text('Category',
-                              style: const TextStyle(
-                                  fontSize: 14, color: _T.ink, fontWeight: FontWeight.w400)),
+                              style: TextStyle(
+                                  fontSize: 14, color: t.txt, fontWeight: FontWeight.w400)),
                           Row(children: [
-                            Text(_category, style: _T.body(size: 14)),
+                            Text(_category, style: t.body(size: 14)),
                             const SizedBox(width: 4),
-                            const Icon(Icons.chevron_right, color: _T.ink3, size: 18),
+                            Icon(Icons.chevron_right, color: t.txt3, size: 18),
                           ]),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
 
                   Container(
-                    color: _T.surface,
+                    color: t.bg2,
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Icon',
+                        Text('Icon',
                             style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w500, color: _T.ink)),
+                                fontSize: 14, fontWeight: FontWeight.w700, color: t.txt)),
                         const SizedBox(height: 14),
                         GridView.builder(
                           shrinkWrap: true,
@@ -1599,14 +2135,14 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                               decoration: BoxDecoration(
                                 color: i == _selectedIconIndex
                                     ? accent.withOpacity(0.12)
-                                    : _T.canvas,
-                                borderRadius: BorderRadius.circular(_T.r8),
+                                    : t.bg3,
+                                borderRadius: BorderRadius.circular(AppTokens.r8),
                                 border: i == _selectedIconIndex
                                     ? Border.all(color: accent, width: 1.5)
-                                    : Border.all(color: _T.border),
+                                    : Border.all(color: t.border),
                               ),
                               child: Icon(_icons[i],
-                                  color: i == _selectedIconIndex ? accent : _T.ink3,
+                                  color: i == _selectedIconIndex ? accent : t.txt3,
                                   size: 22),
                             ),
                           ),
@@ -1614,17 +2150,17 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
 
                   Container(
-                    color: _T.surface,
+                    color: t.bg2,
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Color',
+                        Text('Color',
                             style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w500, color: _T.ink)),
+                                fontSize: 14, fontWeight: FontWeight.w700, color: t.txt)),
                         const SizedBox(height: 14),
                         GridView.builder(
                           shrinkWrap: true,
@@ -1637,9 +2173,9 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                             child: Container(
                               decoration: BoxDecoration(
                                   color: _colors[i],
-                                  borderRadius: BorderRadius.circular(_T.r8),
+                                  borderRadius: BorderRadius.circular(AppTokens.r8),
                                   border: i == _selectedColorIndex
-                                      ? Border.all(color: _T.ink, width: 2)
+                                      ? Border.all(color: t.txt, width: 2)
                                       : null),
                               child: i == _selectedColorIndex
                                   ? const Icon(Icons.check, color: Colors.white, size: 18)
@@ -1651,16 +2187,16 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                     ),
                   ),
 
-                  const SizedBox(height: _T.s32),
+                  const SizedBox(height: AppTokens.s32),
                 ],
               ),
             ),
           ),
 
           Container(
-            decoration: const BoxDecoration(
-              color: _T.surface,
-              border: Border(top: BorderSide(color: _T.border, width: 1)),
+            decoration: BoxDecoration(
+              color: t.bg2,
+              border: Border(top: BorderSide(color: t.border, width: 1)),
             ),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: SafeArea(
@@ -1672,21 +2208,21 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     decoration: BoxDecoration(
-                        color: _T.ink,
-                        borderRadius: BorderRadius.circular(_T.r8)),
+                        color: t.accent,
+                        borderRadius: BorderRadius.circular(AppTokens.r8)),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           _isEdit ? 'Save Changes' : 'Create Streak',
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: _T.surface,
+                              fontWeight: FontWeight.w700,
+                              color: t.bg,
                               letterSpacing: -0.3),
                         ),
-                        const SizedBox(width: _T.s8),
-                        const Icon(Icons.arrow_forward, size: 13, color: _T.surface),
+                        const SizedBox(width: AppTokens.s8),
+                        Icon(Icons.arrow_forward, size: 13, color: t.bg),
                       ],
                     ),
                   ),
@@ -1699,22 +2235,25 @@ class _NewStreakSheetState extends State<NewStreakSheet> {
     );
   }
 
-  InputDecoration _inputDeco(String hint) => InputDecoration(
+  InputDecoration _inputDeco(String hint) {
+    final t = AppTokens.of(context);
+    return InputDecoration(
         hintText: hint,
-        hintStyle: _T.body(size: 14, color: _T.ink3),
+        hintStyle: t.body(size: 14, color: t.txt3),
         filled: true,
-        fillColor: _T.canvas,
+        fillColor: t.bg3,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(_T.r8),
-            borderSide: const BorderSide(color: _T.border)),
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            borderSide: BorderSide(color: t.border)),
         enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(_T.r8),
-            borderSide: const BorderSide(color: _T.border)),
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            borderSide: BorderSide(color: t.border)),
         focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(_T.r8),
-            borderSide: const BorderSide(color: _T.ink, width: 1.5)),
+            borderRadius: BorderRadius.circular(AppTokens.r8),
+            borderSide: BorderSide(color: t.txt, width: 1.5)),
       );
+  }
 }
 
 class _FormSection extends StatelessWidget {
@@ -1723,18 +2262,21 @@ class _FormSection extends StatelessWidget {
   const _FormSection({required this.label, required this.child});
 
   @override
-  Widget build(BuildContext context) => Container(
-        color: _T.surface,
+  Widget build(BuildContext context) {
+      final t = AppTokens.of(context);
+      return Container(
+        color: t.bg2,
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label,
-                style: const TextStyle(
-                    fontSize: 13, color: _T.ink2, fontWeight: FontWeight.w400)),
+                style: TextStyle(
+                    fontSize: 13, color: t.txt2, fontWeight: FontWeight.w400)),
             const SizedBox(height: 8),
             child,
           ],
         ),
       );
+  }
 }

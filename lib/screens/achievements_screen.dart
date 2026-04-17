@@ -1,46 +1,12 @@
-// ignore_for_file: deprecated_member_use, unused_local_variable, unused_field, unused_element
+// ignore_for_file: deprecated_member_use, unused_local_variable, unused_field
 
 import 'package:flutter/material.dart';
 // ignore: unnecessary_import
 import 'package:flutter/cupertino.dart';
+import 'package:habit_tracker/theme/app_tokens.dart';
+import 'goals_screen.dart';
+import 'streaks_screen.dart';
 
-// ─── Design Tokens ────────────────────────────────────────────────────────────
-class _T {
-  _T._();
-  static const Color ink      = Color(0xFF0D0D0D);
-  static const Color ink2     = Color(0xFF5C5C5C);
-  static const Color ink3     = Color(0xFFA3A3A3);
-  static const Color surface  = Color(0xFFFFFFFF);
-  static const Color canvas   = Color(0xFFFAFAF8);
-  static const Color border   = Color(0xFFE6E5E0);
-
-  static const Color purple       = Color(0xFF7C6FD8);
-  static const Color coral       = Color(0xFFD85A30);
-  static const Color teal       = Color(0xFF1D9E75);
-  static const Color blue       = Color(0xFF378ADD);
-  static const Color amber       = Color(0xFFBA7517);
-
-  static const double s4  = 4;
-  static const double s8  = 8;
-  static const double s12 = 12;
-  static const double s16 = 16;
-  static const double s20 = 20;
-
-  static const double r8   = 8;
-  static const double r12  = 12;
-  static const double r100 = 100;
-
-  static TextStyle heading({double size = 24, double spacing = -1.0}) =>
-      TextStyle(fontSize: size, fontWeight: FontWeight.w500, color: ink,
-          height: 1.1, letterSpacing: spacing);
-
-  static TextStyle body({double size = 14, Color? color}) =>
-      TextStyle(fontSize: size, color: color ?? ink2, height: 1.6, letterSpacing: -0.1);
-
-  static TextStyle label({double size = 11, Color? color}) =>
-      TextStyle(fontSize: size, fontWeight: FontWeight.w500,
-          color: color ?? ink3, letterSpacing: 0.06 * size);
-}
 
 // ─── Achievement Model ────────────────────────────────────────────────────────
 class Achievement {
@@ -63,116 +29,177 @@ class Achievement {
 
 // ─── Achievements Screen ──────────────────────────────────────────────────────
 class AchievementsScreen extends StatelessWidget {
-  const AchievementsScreen({super.key});
+  final List<Goal> goals;
+  final List<Streak> streaks;
+  final VoidCallback? onBack;
+
+  const AchievementsScreen({
+    super.key,
+    required this.goals,
+    required this.streaks,
+    this.onBack,
+  });
 
   List<Achievement> _getAchievements() {
-    final now = DateTime.now();
-    return [
+    final allHabits = goals.length + streaks.length;
+    final bestStreak = [
+      ...goals.map((g) => g.currentStreak),
+      ...streaks.map((s) => s.currentStreak),
+    ].fold(0, (a, b) => a > b ? a : b);
+    final totalCompletions = goals.fold(0, (s, g) => s + g.currentDays) +
+        streaks.fold(0, (s, st) => s + st.totalCompletions);
+
+    // Earliest date any habit was created (proxy for "first habit" date)
+    final allHistoryDates = [
+      ...goals.expand((g) => g.completionHistory),
+      ...streaks.expand((s) => s.completionHistory),
+    ]..sort();
+    final firstActivityDate =
+        allHistoryDates.isNotEmpty ? allHistoryDates.first : null;
+
+    // Perfect day: any calendar date where ALL habits were completed
+    DateTime? perfectDayDate;
+    if (allHabits > 0) {
+      final Map<String, int> completionsPerDay = {};
+      for (final d in allHistoryDates) {
+        final key = '${d.year}-${d.month}-${d.day}';
+        completionsPerDay[key] = (completionsPerDay[key] ?? 0) + 1;
+      }
+      final perfectKey = completionsPerDay.entries
+          .where((e) => e.value >= allHabits)
+          .map((e) => e.key)
+          .toList()
+        ..sort();
+      if (perfectKey.isNotEmpty) {
+        final parts = perfectKey.first.split('-').map(int.parse).toList();
+        perfectDayDate = DateTime(parts[0], parts[1], parts[2]);
+      }
+    }
+
+    // Consistency: current best streak >= 14
+    final consistencyDate = bestStreak >= 14 ? DateTime.now() : null;
+
+    final achievements = [
       Achievement(
         title: 'First Step',
         description: 'Create your first habit',
         icon: Icons.directions_walk,
-        color: _T.teal,
-        unlocked: true,
-        unlockedDate: now.subtract(const Duration(days: 30)),
+        color: AppTokens.teal,
+        unlocked: allHabits >= 1,
+        unlockedDate: firstActivityDate,
       ),
       Achievement(
         title: 'Week Warrior',
         description: 'Maintain a 7-day streak',
         icon: Icons.local_fire_department,
-        color: _T.coral,
-        unlocked: true,
-        unlockedDate: now.subtract(const Duration(days: 20)),
+        color: AppTokens.coral,
+        unlocked: bestStreak >= 7,
+        unlockedDate: bestStreak >= 7 ? DateTime.now() : null,
       ),
       Achievement(
         title: 'Month Master',
         description: 'Maintain a 30-day streak',
         icon: Icons.star,
-        color: _T.amber,
-        unlocked: false,
+        color: AppTokens.amber,
+        unlocked: bestStreak >= 30,
+        unlockedDate: bestStreak >= 30 ? DateTime.now() : null,
       ),
       Achievement(
         title: 'Century',
         description: 'Reach a 100-day streak',
         icon: Icons.diamond,
-        color: _T.purple,
-        unlocked: false,
+        color: AppTokens.purple,
+        unlocked: bestStreak >= 100,
+        unlockedDate: bestStreak >= 100 ? DateTime.now() : null,
       ),
       Achievement(
         title: 'Triple Threat',
         description: 'Complete 3 habits in one day',
         icon: Icons.grid_3x3,
-        color: _T.blue,
-        unlocked: true,
-        unlockedDate: now.subtract(const Duration(days: 15)),
+        color: AppTokens.blue,
+        unlocked: allHabits >= 3,
+        unlockedDate: allHabits >= 3 ? firstActivityDate : null,
       ),
       Achievement(
         title: 'Habit Master',
         description: 'Create 5 different habits',
         icon: Icons.dashboard,
-        color: _T.coral,
-        unlocked: true,
-        unlockedDate: now.subtract(const Duration(days: 10)),
+        color: AppTokens.coral,
+        unlocked: allHabits >= 5,
+        unlockedDate: allHabits >= 5 ? firstActivityDate : null,
       ),
       Achievement(
         title: 'Perfect Day',
         description: 'Complete all habits in a single day',
         icon: Icons.check_circle,
-        color: _T.teal,
-        unlocked: true,
-        unlockedDate: now.subtract(const Duration(days: 5)),
+        color: AppTokens.teal,
+        unlocked: perfectDayDate != null,
+        unlockedDate: perfectDayDate,
       ),
       Achievement(
         title: 'Consistency',
         description: 'Never miss a day for 2 weeks straight',
         icon: Icons.trending_up,
-        color: _T.purple,
-        unlocked: false,
+        color: AppTokens.purple,
+        unlocked: consistencyDate != null,
+        unlockedDate: consistencyDate,
       ),
       Achievement(
         title: 'Century Club',
         description: 'Log 100 total habit completions',
         icon: Icons.emoji_events,
-        color: _T.amber,
-        unlocked: true,
-        unlockedDate: now.subtract(const Duration(days: 3)),
-      ),
-      Achievement(
-        title: 'Legendary',
-        description: 'Unlock all other achievements',
-        icon: Icons.star_half,
-        color: _T.coral,
-        unlocked: false,
+        color: AppTokens.amber,
+        unlocked: totalCompletions >= 100,
+        unlockedDate: totalCompletions >= 100 ? DateTime.now() : null,
       ),
     ];
+
+    final allUnlocked = achievements.every((a) => a.unlocked);
+    achievements.add(Achievement(
+      title: 'Legendary',
+      description: 'Unlock all other achievements',
+      icon: Icons.star_half,
+      color: AppTokens.coral,
+      unlocked: allUnlocked,
+      unlockedDate: allUnlocked ? DateTime.now() : null,
+    ));
+
+    return achievements;
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     final achievements = _getAchievements();
     final unlockedCount = achievements.where((a) => a.unlocked).length;
     final total = achievements.length;
 
     return Scaffold(
-      backgroundColor: _T.canvas,
+      backgroundColor: t.bg,
       appBar: AppBar(
-        backgroundColor: _T.surface,
+        backgroundColor: t.bg2,
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: _T.ink, size: 18),
-          onPressed: () => Navigator.of(context).maybePop(),
+          icon: Icon(Icons.arrow_back_ios, color: t.txt, size: 18),
+          onPressed: () {
+            if (onBack != null) {
+              onBack!();
+            } else {
+              Navigator.of(context).maybePop();
+            }
+          },
         ),
         centerTitle: true,
-        title: const Text('Achievements',
+        title: Text('Achievements',
             style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
-                color: _T.ink,
+                color: t.txt,
                 letterSpacing: -0.4)),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, thickness: 1, color: _T.border),
+          child: Divider(height: 1, thickness: 1, color: t.border),
         ),
       ),
       body: SingleChildScrollView(
@@ -181,7 +208,7 @@ class AchievementsScreen extends StatelessWidget {
           children: [
             // ── Header ──
             Container(
-              color: _T.surface,
+              color: t.bg2,
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -193,10 +220,10 @@ class AchievementsScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('Achievements',
-                              style: _T.heading(size: 20, spacing: -0.8)),
-                          const SizedBox(height: _T.s4),
+                              style: t.heading(size: 20, spacing: -0.8)),
+                          const SizedBox(height: AppTokens.s4),
                           Text('$unlockedCount / $total unlocked',
-                              style: _T.body(size: 12, color: _T.ink3)),
+                              style: t.body(size: 12, color: t.txt3)),
                         ],
                       ),
                       Container(
@@ -204,36 +231,36 @@ class AchievementsScreen extends StatelessWidget {
                         height: 50,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: _T.border, width: 1.5),
+                          border: Border.all(color: t.border, width: 1.5),
                         ),
                         child: Center(
                           child: Text('${((unlockedCount / total) * 100).toStringAsFixed(0)}%',
                               style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
-                                  color: _T.purple)),
+                                  color: AppTokens.purple)),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: _T.s16),
+                  const SizedBox(height: AppTokens.s16),
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(_T.r100),
+                    borderRadius: BorderRadius.circular(AppTokens.r100),
                     child: LinearProgressIndicator(
                       value: unlockedCount / total,
                       minHeight: 5,
-                      backgroundColor: _T.canvas,
-                      valueColor: const AlwaysStoppedAnimation(_T.purple),
+                      backgroundColor: t.bg,
+                      valueColor: const AlwaysStoppedAnimation(AppTokens.purple),
                     ),
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, thickness: 1, color: _T.border),
+            Divider(height: 1, thickness: 1, color: t.border),
 
             // ── Grid ──
             Container(
-              color: _T.canvas,
+              color: t.bg,
               padding: const EdgeInsets.all(16),
               child: GridView.builder(
                 shrinkWrap: true,
@@ -302,12 +329,14 @@ class _AchievementTileState extends State<_AchievementTile> with SingleTickerPro
 
   @override
   Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: AnimatedBuilder(
         animation: _unlockAnimCtrl,
         builder: (context, child) {
+          final t = AppTokens.of(context);
           final scaleVal = widget.achievement.unlocked 
             ? 0.95 + (_unlockAnimCtrl.value * 0.05)
             : 1.0;
@@ -324,12 +353,12 @@ class _AchievementTileState extends State<_AchievementTile> with SingleTickerPro
                 decoration: BoxDecoration(
                   color: _hovered && widget.achievement.unlocked
                       ? const Color(0xFFF8F8F6)
-                      : _T.surface,
-                  borderRadius: BorderRadius.circular(_T.r12),
+                      : t.bg2,
+                  borderRadius: BorderRadius.circular(AppTokens.r12),
                   border: Border.all(
                     color: _hovered && widget.achievement.unlocked
                         ? widget.achievement.color.withOpacity(0.3)
-                        : _T.border,
+                        : t.border,
                     width: _hovered && widget.achievement.unlocked ? 1.5 : 1,
                   ),
                   boxShadow: _hovered && widget.achievement.unlocked
@@ -351,7 +380,7 @@ class _AchievementTileState extends State<_AchievementTile> with SingleTickerPro
                       height: 50,
                       decoration: BoxDecoration(
                         color: widget.achievement.color.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(_T.r12),
+                        borderRadius: BorderRadius.circular(AppTokens.r12),
                       ),
                       child: Icon(
                         widget.achievement.icon,
@@ -359,14 +388,14 @@ class _AchievementTileState extends State<_AchievementTile> with SingleTickerPro
                         size: 24,
                       ),
                     ),
-                    const SizedBox(height: _T.s12),
+                    const SizedBox(height: AppTokens.s12),
                     Text(
                       widget.achievement.title,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: _T.ink,
+                          color: t.txt,
                           letterSpacing: -0.2),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -375,29 +404,29 @@ class _AchievementTileState extends State<_AchievementTile> with SingleTickerPro
                     Text(
                       widget.achievement.description,
                       textAlign: TextAlign.center,
-                      style: _T.body(size: 10, color: _T.ink3),
+                      style: t.body(size: 10, color: t.txt3),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: _T.s8),
+                    const SizedBox(height: AppTokens.s8),
                     if (widget.achievement.unlocked)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: widget.achievement.color,
-                          borderRadius: BorderRadius.circular(_T.r100),
+                          borderRadius: BorderRadius.circular(AppTokens.r100),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.check, color: _T.surface, size: 11),
+                            const Icon(Icons.check, color: Colors.white, size: 11),
                             const SizedBox(width: 4),
                             Text(
                               _formatDate(widget.achievement.unlockedDate!),
                               style: const TextStyle(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w600,
-                                  color: _T.surface),
+                                  color: Colors.white),
                             ),
                           ],
                         ),
@@ -406,14 +435,14 @@ class _AchievementTileState extends State<_AchievementTile> with SingleTickerPro
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: _T.ink3.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(_T.r100),
+                          color: t.txt3.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(AppTokens.r100),
                         ),
-                        child: const Text('Locked',
+                        child: Text('Locked',
                             style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w600,
-                                color: _T.ink3)),
+                                color: t.txt3)),
                       ),
                   ],
                 ),
