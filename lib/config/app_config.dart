@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:habit_tracker/config/secrets.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppConfig — single source of truth for all configurable values
@@ -8,8 +9,8 @@ abstract final class AppConfig {
   static const String appName = 'Habitron';
 
   // ── Gemini API ───────────────────────────────────────────────────────────────
-  /// Set via lib/config/secrets.dart (see secrets.dart.example)
-  static const String geminiApiKey = '';
+  /// Set via lib/config/secrets.dart (gitignored — never commit keys here)
+  static String get geminiApiKey => Secrets.geminiApiKey;
 
   // ── Google Sign-In ───────────────────────────────────────────────────────────
   static const String googleServerClientId =
