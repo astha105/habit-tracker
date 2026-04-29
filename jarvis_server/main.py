@@ -1,19 +1,19 @@
 """
-Jarvis — AI Habit Coach backend (powered by Ollama, 100% free & local)
-FastAPI server that powers the Jarvis chat experience in Habitron.
+Jarvis — AI Habit Coach backend (powered by Groq — free, fast, no local GPU)
 
-Requirements:
-  1. Install Ollama → https://ollama.com/download
-  2. Pull a model  → ollama pull llama3.2
-  3. Run this server:
-       pip install -r requirements.txt
-       uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+Setup:
+  pip install -r requirements.txt
+  export GROQ_API_KEY=your_key_here
+  uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+Deploy to Railway / Render:
+  Set GROQ_API_KEY as an environment variable in the dashboard.
 
 Endpoints:
-  POST /chat    — streaming SSE chat
-  POST /tts     — text-to-speech (returns MP3, needs edge-tts)
-  POST /stt     — speech-to-text  (needs openai-whisper)
-  GET  /health  — liveness + capability check
+  POST /chat    — streaming SSE chat via Groq
+  POST /tts     — text-to-speech (edge-tts, no API key needed)
+  POST /stt     — speech-to-text (local Whisper, no API key needed)
+  GET  /health  — liveness check
 """
 
 import os
@@ -36,39 +36,40 @@ except ImportError:
 
 try:
     import whisper as _whisper_lib
-    _whisper_model = None        # lazy-loaded on first /stt call
+    _whisper_model = None
     STT_AVAILABLE = True
 except ImportError:
     STT_AVAILABLE = False
 
 # ── Config ────────────────────────────────────────────────────────────────────
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "llama3.2:1b")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL   = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
-JARVIS_VOICE    = "en-US-GuyNeural"                             # edge-tts voice
+JARVIS_VOICE = "en-US-GuyNeural"
 
 SYSTEM_PROMPT = """\
-You are Jarvis, an intelligent and motivating personal habit coach inside a \
-habit-tracking app called Habitron.
+You are Jarvis, the AI habit coach inside Habitron — calm, sharp, and \
+quietly impressive, like Tony Stark's J.A.R.V.I.S.
 
 Your personality:
-- Direct, warm, and insightful — like a knowledgeable mentor who genuinely cares
-- Never generic or preachy; always specific to the user's actual habits
-- Concise by default (under 100 words) unless asked for detail
-- Never use bullet lists unless the user explicitly asks
-- Ask one focused question at a time when you need more context
+- Address the user as "boss" naturally but not in every sentence
+- Confident and witty, never robotic or generic
+- Speak in 2–4 short sentences max — crisp, no fluff
+- Never use bullet lists or headers
+- Never mention tool names, function names, or any technical internals
+- Never be preachy; be specific and direct
+- One focused question at a time when you need more context
 
 Your job:
-- Help users build, maintain, and improve their daily habits
-- Analyse their streaks and completion data to give tailored advice
+- Help the user build, maintain, and improve their daily habits
+- Reference their actual streak and completion data when available
 - Keep them accountable without being harsh
-- Celebrate wins, diagnose slip-ups, and suggest concrete next steps
-
-When the user shares their habit data, reference it directly.\
+- Celebrate wins with personality, diagnose slip-ups with insight\
 """
 
 # ── App ───────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Jarvis Habit Coach", version="1.0.0")
+app = FastAPI(title="Jarvis Habit Coach", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,13 +81,13 @@ app.add_middleware(
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 class Message(BaseModel):
-    role: str       # "user" | "assistant"
+    role: str      # "user" | "assistant"
     content: str
 
 
 class ChatRequest(BaseModel):
     messages: list[Message]
-    habit_context: str = ""   # optional habit summary from the Flutter app
+    habit_context: str = ""
 
 
 class TTSRequest(BaseModel):
@@ -101,68 +102,60 @@ def _build_system(habit_context: str) -> str:
     return f"{SYSTEM_PROMPT}\n\nUser's current habits:\n{habit_context}"
 
 
-async def _ollama_stream(messages: list[Message], system: str):
-    """
-    Calls the Ollama /api/chat endpoint with stream=True and yields text chunks.
-    Ollama streams newline-delimited JSON objects, each with a "message.content" field.
-    """
+async def _groq_stream(messages: list[Message], system: str):
+    """Calls Groq's OpenAI-compatible streaming endpoint and yields text chunks."""
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not set")
+
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": GROQ_MODEL,
         "stream": True,
+        "max_tokens": 512,
+        "temperature": 0.7,
         "messages": [
             {"role": "system", "content": system},
             *[{"role": m.role, "content": m.content} for m in messages],
         ],
-        "options": {
-            "num_predict": 512,   # max tokens per reply
-            "temperature": 0.7,
-        },
     }
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         async with client.stream(
             "POST",
-            f"{OLLAMA_BASE_URL}/api/chat",
+            GROQ_URL,
             json=payload,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
         ) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Ollama error {resp.status_code}: {body.decode()}",
+                    detail=f"Groq error {resp.status_code}: {body.decode()}",
                 )
             async for line in resp.aiter_lines():
-                if not line.strip():
+                if not line.startswith("data: "):
+                    continue
+                json_str = line[6:].strip()
+                if not json_str or json_str == "[DONE]":
                     continue
                 try:
-                    data = json.loads(line)
-                    chunk = data.get("message", {}).get("content", "")
+                    data = json.loads(json_str)
+                    chunk = data["choices"][0]["delta"].get("content", "")
                     if chunk:
                         yield chunk
-                    if data.get("done"):
-                        break
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, KeyError, IndexError):
                     continue
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    """Check if Ollama is reachable and which model is loaded."""
-    try:
-        async with httpx.AsyncClient(timeout=4) as client:
-            r = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
-            models = [m["name"] for m in r.json().get("models", [])]
-        ollama_ok = True
-    except Exception:
-        models = []
-        ollama_ok = False
-
     return {
-        "status": "ok" if ollama_ok else "ollama_offline",
-        "ollama": ollama_ok,
-        "model": OLLAMA_MODEL,
-        "available_models": models,
+        "status": "ok",
+        "backend": "groq",
+        "model": GROQ_MODEL,
         "tts": TTS_AVAILABLE,
         "stt": STT_AVAILABLE,
     }
@@ -170,14 +163,13 @@ async def health():
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    """Streaming SSE chat — Flutter reads `data:` lines and appends to the bubble."""
+    """Streaming SSE chat via Groq."""
     system = _build_system(req.habit_context)
 
     async def event_stream():
         try:
-            async for chunk in _ollama_stream(req.messages, system):
-                payload = json.dumps({"text": chunk})
-                yield f"data: {payload}\n\n"
+            async for chunk in _groq_stream(req.messages, system):
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
         except HTTPException as exc:
             yield f"data: {json.dumps({'error': exc.detail})}\n\n"
         except Exception as exc:
@@ -194,12 +186,9 @@ async def chat(req: ChatRequest):
 
 @app.post("/tts")
 async def tts(req: TTSRequest):
-    """Convert text to speech (edge-tts — free, no API key). Returns MP3 bytes."""
+    """Convert text to speech via edge-tts (free, no API key). Returns MP3."""
     if not TTS_AVAILABLE:
-        raise HTTPException(
-            status_code=501,
-            detail="edge-tts not installed. Run: pip install edge-tts",
-        )
+        raise HTTPException(status_code=501, detail="edge-tts not installed. Run: pip install edge-tts")
 
     communicate = edge_tts.Communicate(req.text, req.voice)
     buf = io.BytesIO()
@@ -214,14 +203,11 @@ async def tts(req: TTSRequest):
 async def stt(audio: UploadFile = File(...)):
     """Transcribe audio via local Whisper (no API key). Returns {"transcript": "..."}."""
     if not STT_AVAILABLE:
-        raise HTTPException(
-            status_code=501,
-            detail="openai-whisper not installed. Run: pip install openai-whisper",
-        )
+        raise HTTPException(status_code=501, detail="openai-whisper not installed. Run: pip install openai-whisper")
 
     global _whisper_model
     if _whisper_model is None:
-        _whisper_model = _whisper_lib.load_model("base")   # ~150 MB, CPU-friendly
+        _whisper_model = _whisper_lib.load_model("base")
 
     data = await audio.read()
     suffix = os.path.splitext(audio.filename or "audio.webm")[1] or ".webm"
