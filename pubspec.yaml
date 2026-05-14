@@ -21,6 +21,7 @@ dependencies:
   home_widget: ^0.6.0
   timezone: ^0.9.4
   http: ^1.2.0
+  google_fonts: ^6.2.1
   speech_to_text: ^7.0.0
   flutter_tts: ^4.2.0
   just_audio: ^0.9.43

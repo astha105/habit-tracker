@@ -34,8 +34,9 @@ const crypto = require("crypto");
 initializeApp();
 const db = getFirestore();
 
-// Secrets — set via:  firebase functions:secrets:set RAZORPAY_WEBHOOK_SECRET
+// Secrets — set via:  firebase functions:secrets:set <SECRET_NAME>
 const RAZORPAY_SECRET = defineSecret("RAZORPAY_WEBHOOK_SECRET");
+const GEMINI_API_KEY   = defineSecret("GEMINI_API_KEY");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -474,8 +475,30 @@ exports.getStats = onCall(async (request) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. AI — Daily Motivation Message  (Claude-powered, premium)
+// 5. AI — Daily Motivation Message / Weekly Review / Coach Chat  (Gemini)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Calls Gemini 2.0 Flash with a single user prompt and returns the text.
+ * Returns null (does not throw) on non-fatal errors so callers can fall back.
+ */
+async function callGemini(apiKey, prompt, maxTokens = 400) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: maxTokens },
+    }),
+  });
+  if (!res.ok) {
+    console.warn(`callGemini HTTP ${res.status}`);
+    return null;
+  }
+  const data = await res.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+}
 
 /**
  * Callable: getDailyMotivation
@@ -486,7 +509,9 @@ exports.getStats = onCall(async (request) => {
  *
  * Output: { message, generatedBy: "gemini"|"local", cached: bool }
  */
-exports.getDailyMotivation = onCall(async (request) => {
+exports.getDailyMotivation = onCall(
+  { secrets: [GEMINI_API_KEY] },
+  async (request) => {
   requireAuth(request.auth);
   const uid = request.auth.uid;
   const today = isoDate();
@@ -512,20 +537,32 @@ exports.getDailyMotivation = onCall(async (request) => {
     ? Math.round((completedToday / activeHabits) * 100)
     : 0;
 
+  // Try Gemini first; fall back to rule-based on error
   let message;
-  if (bestStreak >= 30) {
-    message = `${bestStreak} days straight — you've made this a part of who you are.`;
-  } else if (bestStreak >= 14) {
-    message = "Two weeks of consistency. Your future self is already thanking you.";
-  } else if (bestStreak >= 7) {
-    message = "A full week on your best streak. Now make it two.";
-  } else if (completionPct >= 80) {
-    message = `You're completing ${completionPct}% of your habits. That's not luck — that's discipline.`;
-  } else {
-    message = "Every expert was once a beginner. Show up today.";
+  let generatedBy = "local";
+  try {
+    const prompt = `You are a concise habit coach. Write a single motivational sentence (max 20 words) for a user with these stats: ${activeHabits} active habits, best streak ${bestStreak} days, ${completionPct}% completed today. Be direct and personal.`;
+    message = await callGemini(GEMINI_API_KEY.value(), prompt, 60);
+    if (message) generatedBy = "gemini";
+  } catch (e) {
+    console.warn("Gemini motivation fallback:", e.message);
   }
 
-  const payload = { message, generatedBy: "local", date: today };
+  if (!message) {
+    if (bestStreak >= 30) {
+      message = `${bestStreak} days straight — you've made this a part of who you are.`;
+    } else if (bestStreak >= 14) {
+      message = "Two weeks of consistency. Your future self is already thanking you.";
+    } else if (bestStreak >= 7) {
+      message = "A full week on your best streak. Now make it two.";
+    } else if (completionPct >= 80) {
+      message = `You're completing ${completionPct}% of your habits. That's not luck — that's discipline.`;
+    } else {
+      message = "Every expert was once a beginner. Show up today.";
+    }
+  }
+
+  const payload = { message, generatedBy, date: today };
   await cacheRef.set(payload);
   return { ...payload, cached: false };
 });
@@ -540,7 +577,9 @@ exports.getDailyMotivation = onCall(async (request) => {
  *
  * Output: { review, generatedBy, weekNumber, cached }
  */
-exports.getWeeklyReview = onCall(async (request) => {
+exports.getWeeklyReview = onCall(
+  { secrets: [GEMINI_API_KEY] },
+  async (request) => {
   requireAuth(request.auth);
   const uid = request.auth.uid;
   const week = isoWeek();
@@ -573,12 +612,26 @@ exports.getWeeklyReview = onCall(async (request) => {
   const perfectDays = weekDates.filter((d) =>
     habits.every((h) => (h.completionHistory || []).includes(d))
   ).length;
+  const habitNames = habits.map((h) => h.name || "unnamed habit").join(", ");
 
-  const review = completionPct >= 70
-    ? `Week ${week} was solid — ${completionPct}% completion across ${habits.length} habits. ${perfectDays} perfect days. Keep pushing.`
-    : `Week ${week}: ${completionPct}% completion. There's room to grow. Pick one habit and make it non-negotiable next week.`;
+  // Try Gemini; fall back to rule-based
+  let review;
+  let generatedBy = "local";
+  try {
+    const prompt = `You are a concise habit coach writing a weekly review. Write 2-3 sentences (max 60 words). Stats: week ${week}, ${habits.length} habits (${habitNames}), ${completionPct}% overall completion, ${perfectDays} perfect days. Be honest, specific, and encouraging.`;
+    review = await callGemini(GEMINI_API_KEY.value(), prompt, 150);
+    if (review) generatedBy = "gemini";
+  } catch (e) {
+    console.warn("Gemini weekly review fallback:", e.message);
+  }
 
-  const payload = { review, generatedBy: "local", weekNumber: week };
+  if (!review) {
+    review = completionPct >= 70
+      ? `Week ${week} was solid — ${completionPct}% completion across ${habits.length} habits. ${perfectDays} perfect days. Keep pushing.`
+      : `Week ${week}: ${completionPct}% completion. There's room to grow. Pick one habit and make it non-negotiable next week.`;
+  }
+
+  const payload = { review, generatedBy, weekNumber: week };
   await cacheRef.set(payload);
   return { ...payload, cached: false };
 });
@@ -598,7 +651,48 @@ exports.getWeeklyReview = onCall(async (request) => {
  *
  * Output: { reply }
  */
-// chatWithCoach is handled client-side via GeminiService in Flutter.
+exports.chatWithCoach = onCall(
+  { secrets: [GEMINI_API_KEY] },
+  async (request) => {
+  requireAuth(request.auth);
+  const { messages, habitContext = "" } = request.data;
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new HttpsError("invalid-argument", "messages array required.");
+  }
+
+  const systemPrompt = `You are Jarvis, a supportive and direct habit coach. ${habitContext ? `User's habits: ${habitContext}.` : ""} Keep replies concise (under 120 words). No bullet lists — conversational prose only.`;
+
+  const contents = messages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content || "" }],
+  }));
+
+  const body = JSON.stringify({
+    system_instruction: { parts: [{ text: systemPrompt }] },
+    contents,
+    generationConfig: { maxOutputTokens: 300 },
+  });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY.value()}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    console.error("Gemini chatWithCoach error:", res.status, err);
+    throw new HttpsError("internal", `Gemini error ${res.status}`);
+  }
+
+  const data = await res.json();
+  const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!reply) throw new HttpsError("internal", "Empty Gemini response");
+
+  return { reply };
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 8. Payments — Razorpay Webhook

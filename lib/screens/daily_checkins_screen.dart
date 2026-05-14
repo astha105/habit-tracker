@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, unused_field
+// ignore_for_file: deprecated_member_use, unused_field, unused_element
 
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -157,7 +157,8 @@ class DailyHabit {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 class DailyCheckinsScreen extends StatefulWidget {
   final VoidCallback? onBack;
-  const DailyCheckinsScreen({super.key, this.onBack});
+  final bool isMainTab;
+  const DailyCheckinsScreen({super.key, this.onBack, this.isMainTab = false});
 
   @override
   State<DailyCheckinsScreen> createState() => _DailyCheckinsScreenState();
@@ -365,6 +366,78 @@ class _DailyCheckinsScreenState extends State<DailyCheckinsScreen> {
     );
   }
 
+  PreferredSizeWidget _buildMainTabAppBar(_T t) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    final now = DateTime.now();
+    final dateStr = '${months[now.month - 1]} ${now.day}, ${_weekdayName(now.weekday)}';
+    return AppBar(
+      backgroundColor: t.bg,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      automaticallyImplyLeading: false,
+      titleSpacing: 20,
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Today',
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700,
+                  color: t.txt, letterSpacing: -0.5)),
+          Text(dateStr,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w400,
+                  color: t.txt2)),
+        ],
+      ),
+      actions: [
+        IconButton(
+          icon: Icon(Icons.notifications_outlined, color: t.txt2, size: 22),
+          onPressed: () {},
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: _AddBtn(onTap: _openAdd),
+        ),
+      ],
+    );
+  }
+
+  PreferredSizeWidget _buildBackAppBar(_T t) {
+    return AppBar(
+      backgroundColor: t.bg2,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      leading: IconButton(
+        icon: Icon(Icons.arrow_back_ios, color: t.txt, size: 18),
+        onPressed: () {
+          if (widget.onBack != null) {
+            widget.onBack!();
+          } else {
+            Navigator.of(context).maybePop();
+          }
+        },
+      ),
+      centerTitle: true,
+      title: Text('Daily Check-in',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500,
+              color: t.txt, letterSpacing: -0.4)),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Divider(height: 1, thickness: 1, color: t.border),
+      ),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: _AddBtn(onTap: _openAdd),
+        ),
+      ],
+    );
+  }
+
+  String _weekdayName(int weekday) {
+    const names = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    return names[weekday - 1];
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = _T.of(context);
@@ -372,42 +445,7 @@ class _DailyCheckinsScreenState extends State<DailyCheckinsScreen> {
 
     return Scaffold(
       backgroundColor: t.bg,
-      appBar: AppBar(
-        backgroundColor: t.bg2,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios, color: t.txt, size: 18),
-          onPressed: () {
-            if (widget.onBack != null) {
-              widget.onBack!();
-            } else {
-              Navigator.of(context).maybePop();
-            }
-          },
-        ),
-        centerTitle: true,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _LogoMark(size: 22),
-            const SizedBox(width: _T.s8),
-            Text('Daily Check-in',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500,
-                    color: t.txt, letterSpacing: -0.4)),
-          ],
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, thickness: 1, color: t.border),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: _AddBtn(onTap: _openAdd),
-          ),
-        ],
-      ),
+      appBar: widget.isMainTab ? _buildMainTabAppBar(t) : _buildBackAppBar(t),
       body: _loadingHabits
           ? const Center(child: CircularProgressIndicator())
           : _habits.isEmpty

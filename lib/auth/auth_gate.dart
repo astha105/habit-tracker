@@ -83,7 +83,9 @@ class _AuthGateState extends State<AuthGate> {
           return const LandingScreen();
         }
 
-        return const OnboardingScreen();
+        return OnboardingScreen(
+          onComplete: () => setState(() => _onboardingComplete = true),
+        );
       },
     );
   }

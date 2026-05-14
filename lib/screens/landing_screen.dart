@@ -7,10 +7,13 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:habit_tracker/screens/goals_screen.dart';
 import 'package:habit_tracker/screens/daily_checkins_screen.dart';
 import 'package:habit_tracker/screens/weekly_insights_screen.dart';
+import 'package:habit_tracker/screens/streaks_screen.dart';
 import 'package:habit_tracker/screens/achievements_screen.dart';
 import 'package:habit_tracker/screens/paywall_screen.dart';
 import 'package:habit_tracker/screens/coach_screen.dart';
 import 'package:habit_tracker/screens/partners_screen.dart';
+import 'package:habit_tracker/screens/water_tracker_screen.dart';
+import 'package:habit_tracker/screens/period_tracker_screen.dart';
 import 'package:habit_tracker/theme/app_colors.dart';
 import 'package:habit_tracker/theme/app_tokens.dart';
 import 'package:habit_tracker/config/app_config.dart';
@@ -23,8 +26,9 @@ import 'package:habit_tracker/services/notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 
-// Lime-green accent used throughout the home UI
-const Color _kLime = Color(0xFFC5FF47);
+// Primary blue accent used throughout the home UI
+const Color _kBlue = Color(0xFF5B8DEF);
+const Color _kBlueDim = Color(0xFF1A2E4A);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stats Service (Singleton for global data)
@@ -319,30 +323,30 @@ class _LandingScreenState extends State<LandingScreen> with TickerProviderStateM
           statsService: _statsService,
           dataLoaded: _dataLoaded,
           tokens: tokens,
-          onGoToGoals: () => setState(() => _activeTabIndex = 2),
-          onGoToInsights: () => setState(() => _activeTabIndex = 1),
+          onGoToGoals: () => setState(() => _activeTabIndex = 1),
+          onGoToInsights: () => setState(() => _activeTabIndex = 3),
           onTrack: () => _push(const PaywallScreen()),
-          onDailyCheckins: () => setState(() => _activeTabIndex = 3),
-          onAchievements: () => setState(() => _activeTabIndex = 4),
+          onDailyCheckins: () => _push(const DailyCheckinsScreen()),
+          onAchievements: () => _push(AchievementsScreen(
+            goals: _goals,
+            streaks: const [],
+            onBack: () {},
+          )),
           onCoach: () => _push(const CoachScreen()),
           onPartners: () => _push(const PartnersScreen()),
+          onWaterTracker: () => _push(const WaterTrackerScreen()),
+          onPeriodTracker: () => _push(const PeriodTrackerScreen()),
         );
       case 1:
-        return WeeklyInsightsScreen(onBack: () => setState(() => _activeTabIndex = 0));
-      case 2:
         return GoalsScreen(onBack: () {
           setState(() => _activeTabIndex = 0);
           _loadAll();
         });
+      case 2:
+        return StreaksScreen(onBack: () => setState(() => _activeTabIndex = 0));
       case 3:
-        return DailyCheckinsScreen(onBack: () => setState(() => _activeTabIndex = 0));
+        return WeeklyInsightsScreen(onBack: () => setState(() => _activeTabIndex = 0));
       case 4:
-        return AchievementsScreen(
-          goals: _goals,
-          streaks: const [],
-          onBack: () => setState(() => _activeTabIndex = 0),
-        );
-      case 5:
         return _ProfileTab(
           onLogout: _logout,
           loggingOut: _loggingOut,
@@ -363,7 +367,8 @@ class _HomeTab extends StatefulWidget {
   final bool dataLoaded;
   final AppTokens tokens;
   final VoidCallback onGoToGoals, onGoToInsights;
-  final VoidCallback onTrack, onDailyCheckins, onAchievements, onCoach, onPartners;
+  final VoidCallback onTrack, onDailyCheckins, onAchievements, onCoach, onPartners,
+      onWaterTracker, onPeriodTracker;
 
   const _HomeTab({
     required this.goals,
@@ -377,6 +382,8 @@ class _HomeTab extends StatefulWidget {
     required this.onAchievements,
     required this.onCoach,
     required this.onPartners,
+    required this.onWaterTracker,
+    required this.onPeriodTracker,
   });
 
   @override
@@ -446,6 +453,13 @@ class _HomeTabState extends State<_HomeTab> with SingleTickerProviderStateMixin 
     super.dispose();
   }
 
+  String _todayLabel() {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    final now = DateTime.now();
+    return '${months[now.month - 1]} ${now.day}, ${days[now.weekday - 1]}';
+  }
+
   Widget _s(int i, Widget child) => FadeTransition(
         opacity: _fades[i],
         child: SlideTransition(position: _slides[i], child: child),
@@ -465,20 +479,41 @@ class _HomeTabState extends State<_HomeTab> with SingleTickerProviderStateMixin 
         children: [
           // ── Header ──────────────────────────────────────────────────────────
           _s(0, Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            padding: const EdgeInsets.fromLTRB(24, 20, 16, 0),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
-                  child: Text(
-                    'Hi, $name!',
-                    style: TextStyle(
-                      fontSize: 30,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : const Color(0xFF0D0D0D),
-                      letterSpacing: -0.8,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Today',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : const Color(0xFF0D0D0D),
+                          letterSpacing: -0.7,
+                        ),
+                      ),
+                      Text(
+                        _todayLabel(),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? const Color(0xFF8A8AA0) : const Color(0xFF6B6B80),
+                        ),
+                      ),
+                    ],
                   ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.notifications_outlined,
+                    color: isDark ? const Color(0xFF8A8AA0) : const Color(0xFF6B6B80),
+                    size: 22,
+                  ),
+                  onPressed: () {},
                 ),
                 GestureDetector(
                   onTap: () async {
@@ -489,8 +524,8 @@ class _HomeTabState extends State<_HomeTab> with SingleTickerProviderStateMixin 
                     await ThemeController.instance.setMode(newMode);
                   },
                   child: Container(
-                    width: 40,
-                    height: 40,
+                    width: 36,
+                    height: 36,
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFE8E8E3),
                       shape: BoxShape.circle,
@@ -503,13 +538,29 @@ class _HomeTabState extends State<_HomeTab> with SingleTickerProviderStateMixin 
                                 MediaQuery.of(context).platformBrightness == Brightness.dark);
                         return Icon(
                           dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-                          size: 18,
+                          size: 16,
                           color: isDark ? Colors.white54 : Colors.black45,
                         );
                       },
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                if (user?.photoURL != null)
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundImage: NetworkImage(user!.photoURL!),
+                  )
+                else
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: _kBlue,
+                    child: Text(
+                      name.isNotEmpty ? name[0].toUpperCase() : '?',
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                const SizedBox(width: 8),
               ],
             ),
           )),
@@ -586,6 +637,8 @@ class _HomeTabState extends State<_HomeTab> with SingleTickerProviderStateMixin 
                 onPartners: widget.onPartners,
                 onDailyCheckins: widget.onDailyCheckins,
                 onAchievements: widget.onAchievements,
+                onWaterTracker: widget.onWaterTracker,
+                onPeriodTracker: widget.onPeriodTracker,
               ),
             ),
           ),
@@ -660,7 +713,7 @@ class _DateStrip extends StatelessWidget {
             width: 46,
             decoration: BoxDecoration(
               color: isToday
-                  ? _kLime
+                  ? _kBlue
                   : (isDark ? const Color(0xFF1A1A1A) : const Color(0xFFEAEAE5)),
               borderRadius: BorderRadius.circular(13),
             ),
@@ -673,7 +726,7 @@ class _DateStrip extends StatelessWidget {
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
                     color: isToday
-                        ? Colors.black
+                        ? Colors.white
                         : (isDark ? Colors.white : const Color(0xFF1A1A1A)),
                   ),
                 ),
@@ -684,7 +737,7 @@ class _DateStrip extends StatelessWidget {
                     fontSize: 10,
                     fontWeight: FontWeight.w500,
                     color: isToday
-                        ? Colors.black54
+                        ? Colors.white70
                         : (isDark ? const Color(0xFF555555) : const Color(0xFF999999)),
                   ),
                 ),
@@ -768,6 +821,8 @@ class _HabitContent extends StatelessWidget {
   final VoidCallback onPartners;
   final VoidCallback onDailyCheckins;
   final VoidCallback onAchievements;
+  final VoidCallback onWaterTracker;
+  final VoidCallback onPeriodTracker;
 
   const _HabitContent({
     required this.items,
@@ -778,6 +833,8 @@ class _HabitContent extends StatelessWidget {
     required this.onPartners,
     required this.onDailyCheckins,
     required this.onAchievements,
+    required this.onWaterTracker,
+    required this.onPeriodTracker,
   });
 
   @override
@@ -786,7 +843,7 @@ class _HabitContent extends StatelessWidget {
       return const Padding(
         padding: EdgeInsets.only(top: 40),
         child: Center(
-          child: CircularProgressIndicator(strokeWidth: 1.5, color: _kLime),
+          child: CircularProgressIndicator(strokeWidth: 1.5, color: _kBlue),
         ),
       );
     }
@@ -813,8 +870,15 @@ class _HabitContent extends StatelessWidget {
         ),
         if (listItems.isNotEmpty) ...[
           const SizedBox(height: 12),
-          for (final item in listItems)
-            _HabitListItem(item: item, isDark: isDark),
+          SizedBox(
+            height: 88,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: listItems.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, i) => _HabitListChip(item: listItems[i], isDark: isDark),
+            ),
+          ),
         ],
         const SizedBox(height: 20),
         Row(
@@ -836,6 +900,30 @@ class _HabitContent extends StatelessWidget {
                 iconColor: AppTokens.coral,
                 isDark: isDark,
                 onTap: onPartners,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _ActionCard(
+                icon: Icons.water_drop_rounded,
+                label: 'Water\nTracker',
+                iconColor: const Color(0xFF4FC3F7),
+                isDark: isDark,
+                onTap: onWaterTracker,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _ActionCard(
+                icon: Icons.favorite_rounded,
+                label: 'Period\nTracker',
+                iconColor: const Color(0xFFE57373),
+                isDark: isDark,
+                onTap: onPeriodTracker,
               ),
             ),
           ],
@@ -957,7 +1045,7 @@ class _HabitGridCard extends StatelessWidget {
                 height: 26,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isDone ? _kLime : Colors.transparent,
+                  color: isDone ? _kBlue : Colors.transparent,
                   border: isDone
                       ? null
                       : Border.all(
@@ -968,7 +1056,7 @@ class _HabitGridCard extends StatelessWidget {
                         ),
                 ),
                 child: isDone
-                    ? const Icon(Icons.check_rounded, size: 14, color: Colors.black)
+                    ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
                     : null,
               ),
             ],
@@ -1037,7 +1125,7 @@ class _HabitListItem extends StatelessWidget {
             height: 24,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isDone ? _kLime : Colors.transparent,
+              color: isDone ? _kBlue : Colors.transparent,
               border: isDone
                   ? null
                   : Border.all(
@@ -1048,7 +1136,7 @@ class _HabitListItem extends StatelessWidget {
                     ),
             ),
             child: isDone
-                ? const Icon(Icons.check_rounded, size: 13, color: Colors.black)
+                ? const Icon(Icons.check_rounded, size: 13, color: Colors.white)
                 : null,
           ),
           const SizedBox(width: 14),
@@ -1078,6 +1166,76 @@ class _HabitListItem extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Habit List Chip — compact horizontal card for overflow habits
+// ─────────────────────────────────────────────────────────────────────────────
+class _HabitListChip extends StatelessWidget {
+  final _TodayItem item;
+  final bool isDark;
+
+  const _HabitListChip({required this.item, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDone = item.isDone;
+    final mutedColor = isDark ? const Color(0xFF555555) : const Color(0xFFAAAAAA);
+
+    return Container(
+      width: 140,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isDone ? _kBlue : Colors.transparent,
+                  border: isDone
+                      ? null
+                      : Border.all(
+                          color: isDark ? const Color(0xFF3A3A3A) : const Color(0xFFCCCCC5),
+                          width: 1.5,
+                        ),
+                ),
+                child: isDone ? const Icon(Icons.check_rounded, size: 12, color: Colors.white) : null,
+              ),
+              const Spacer(),
+              Icon(Icons.emoji_flags_outlined, size: 12, color: item.color),
+            ],
+          ),
+          const Spacer(),
+          Text(
+            item.name,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDone ? mutedColor : (isDark ? Colors.white : const Color(0xFF0D0D0D)),
+              height: 1.3,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (item.streakDays > 0) ...[
+            const SizedBox(height: 3),
+            Text(
+              '${item.streakDays}d streak',
+              style: TextStyle(fontSize: 10, color: mutedColor),
+            ),
+          ],
         ],
       ),
     );
@@ -1116,7 +1274,7 @@ class _EmptyHabits extends StatelessWidget {
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: _kLime,
+                color: _kBlue,
               ),
             ),
           ),
@@ -1275,47 +1433,41 @@ class _NavBar extends StatelessWidget {
   });
 
   static const _items = [
-    (0, Icons.home_rounded),
-    (1, Icons.show_chart_rounded),
-    (2, Icons.add_rounded),
-    (3, Icons.checklist_rounded),
-    (4, Icons.emoji_events_outlined),
-    (5, Icons.person_outline),
+    (0, Icons.today_rounded, 'Today'),
+    (1, Icons.track_changes_rounded, 'Goals'),
+    (2, Icons.local_fire_department_rounded, 'Streaks'),
+    (3, Icons.bar_chart_rounded, 'Insights'),
+    (4, Icons.person_outline_rounded, 'Profile'),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.transparent,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+            width: 0.5,
+          ),
+        ),
+      ),
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-          child: Container(
-            height: 62,
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
-              borderRadius: BorderRadius.circular(31),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(isDark ? 0.35 : 0.08),
-                  blurRadius: 24,
-                  offset: const Offset(0, 4),
+        child: SizedBox(
+          height: 58,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              for (final item in _items)
+                _NavItem(
+                  icon: item.$2,
+                  label: item.$3,
+                  isActive: activeIndex == item.$1,
+                  isDark: isDark,
+                  onTap: () => onTap(item.$1),
                 ),
-              ],
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                for (final item in _items)
-                  _NavItem(
-                    icon: item.$2,
-                    isActive: activeIndex == item.$1,
-                    isDark: isDark,
-                    onTap: () => onTap(item.$1),
-                  ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
@@ -1325,35 +1477,48 @@ class _NavBar extends StatelessWidget {
 
 class _NavItem extends StatelessWidget {
   final IconData icon;
+  final String label;
   final bool isActive;
   final bool isDark;
   final VoidCallback onTap;
 
   const _NavItem({
     required this.icon,
+    required this.label,
     required this.isActive,
     required this.isDark,
     required this.onTap,
   });
 
+  static const _activeColor = Color(0xFF5B8DEF);
+
   @override
   Widget build(BuildContext context) {
+    final inactive = isDark ? const Color(0xFF6B6B6B) : const Color(0xFF8E8E93);
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: isActive ? _kLime : Colors.transparent,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Icon(
-          icon,
-          size: 22,
-          color: isActive
-              ? Colors.black
-              : (isDark ? const Color(0xFF555555) : const Color(0xFF999999)),
+      child: SizedBox(
+        width: 64,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 24,
+              color: isActive ? _activeColor : inactive,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                color: isActive ? _activeColor : inactive,
+                letterSpacing: -0.1,
+              ),
+            ),
+          ],
         ),
       ),
     );

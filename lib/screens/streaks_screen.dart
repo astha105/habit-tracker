@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, unused_local_variable, unused_field, avoid_print, use_build_context_synchronously, use_key_in_widget_constructors
+// ignore_for_file: deprecated_member_use, unused_local_variable, unused_field, avoid_print, use_build_context_synchronously, use_key_in_widget_constructors, unused_element, prefer_final_fields, unused_element_parameter
 
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -596,6 +596,7 @@ class _StreaksScreenState extends State<StreaksScreen> {
   final List<Streak> _streaks = [];
   bool _isLoading = true;
   int _totalXp = 0;
+  String _selectedPeriod = 'Week';
 
   @override
   void initState() {
@@ -770,6 +771,18 @@ class _StreaksScreenState extends State<StreaksScreen> {
     _showCelebration(s);
   }
 
+  Future<void> _openDetail(Streak streak) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => _StreakDetailScreen(
+        streak: streak,
+        onLogDay: streak.loggedToday ? null : () => _logDay(streak),
+        onEdit: () => _openEdit(streak),
+        onDelete: () => _confirmDelete(streak),
+      ),
+    ));
+    setState(() {});
+  }
+
   Future<void> _showCelebration(Streak s) async {
     final xpEarned = _XpService.xpForStreak(s.currentStreak);
     final totalXp = await _XpService.addXp(xpEarned);
@@ -865,9 +878,7 @@ class _StreaksScreenState extends State<StreaksScreen> {
           ),
         ],
       ),
-      body: _streaks.isEmpty
-          ? _buildEmpty()
-          : _buildList(active, notStarted, bestStreak),
+      body: _buildList(active, notStarted, bestStreak),
     );
   }
 
@@ -907,56 +918,140 @@ class _StreaksScreenState extends State<StreaksScreen> {
 
   Widget _buildList(List<Streak> active, List<Streak> notStarted, int bestStreak) {
     final t = AppTokens.of(context);
+    final now = DateTime.now();
+    final weekday = now.weekday; // 1=Mon
+
+    // Daily completion counts for last 7 days
+    final dailyCounts = List.generate(7, (i) {
+      final d = now.subtract(Duration(days: 6 - i));
+      final date = DateTime(d.year, d.month, d.day);
+      final isToday = i == 6;
+      return _streaks.where((s) {
+        if (isToday && s.loggedToday) return true;
+        return s.completionHistory.any((c) =>
+            c.year == date.year && c.month == date.month && c.day == date.day);
+      }).length;
+    });
+
+    // Strength % = logged this week / possible this week
+    final daysElapsed = weekday;
+    int totalPossible = _streaks.length * daysElapsed;
+    int totalLogged = 0;
+    for (final s in _streaks) {
+      for (int i = 0; i < daysElapsed; i++) {
+        final d = now.subtract(Duration(days: weekday - 1 - i));
+        final date = DateTime(d.year, d.month, d.day);
+        final isToday2 = i == daysElapsed - 1;
+        if ((isToday2 && s.loggedToday) ||
+            s.completionHistory.any((c) =>
+                c.year == date.year && c.month == date.month && c.day == date.day)) {
+          totalLogged++;
+        }
+      }
+    }
+    final strength = totalPossible == 0 ? 0.0 : totalLogged / totalPossible;
+
+    final level = _XpService.levelFromXp(_totalXp);
+    final multiplier = (1.0 + (level - 1) * 0.1).toStringAsFixed(1);
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _SummaryStrip(active: active.length, bestStreak: bestStreak, totalXp: _totalXp),
-          Divider(height: 1, thickness: 1, color: t.border),
+          _NewDateStrip(),
+          const SizedBox(height: 16),
 
-          if (active.isNotEmpty) ...[
-            _SectionHeader(label: 'On Fire', accent: AppTokens.coral),
-            AppTokensopStreakCard(
-              streak: active.first,
-              onEdit: () => _openEdit(active.first),
-              onDelete: () => _confirmDelete(active.first),
-              onLongPress: () => _showContextMenu(context, active.first),
-              onLogDay: active.first.loggedToday ? null : () => _logDay(active.first),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: _StreakRateCard(
+                    dailyCounts: dailyCounts,
+                    multiplier: multiplier,
+                    totalXp: _totalXp,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: _StrengthCard(strength: strength, onAdd: _openAdd),
+                ),
+              ],
             ),
-          ],
+          ),
 
-          if (active.length > 1) ...[
-            _SectionHeader(label: 'Active Streaks', accent: AppTokens.coral),
-            ...active.skip(1).map((s) => _SwipeCard(
-              key: ValueKey(s.hashCode),
-              streak: s,
-              onEdit: () => _openEdit(s),
-              onDelete: () => _confirmDelete(s),
-              onLongPress: () => _showContextMenu(context, s),
-              onLogDay: s.loggedToday ? null : () => _logDay(s),
-            )),
-          ],
+          const SizedBox(height: 20),
 
-          if (_streaks.isNotEmpty) ...[
-            Divider(height: 1, thickness: 1, color: t.border),
-            _SectionHeader(label: 'This Week', accent: AppTokens.purple),
-            _WeeklyOverview(streaks: _streaks),
-          ],
+          _PeriodTabBar(
+            selected: _selectedPeriod,
+            onSelect: (p) => setState(() => _selectedPeriod = p),
+          ),
 
-          if (notStarted.isNotEmpty) ...[
-            Divider(height: 1, thickness: 1, color: t.border),
-            _SectionHeader(label: 'Not Started', accent: t.txt3),
-            ...notStarted.map((s) => _SwipeCard(
-              key: ValueKey(s.hashCode),
-              streak: s,
-              onEdit: () => _openEdit(s),
-              onDelete: () => _confirmDelete(s),
-              onLongPress: () => _showContextMenu(context, s),
-              onLogDay: s.loggedToday ? null : () => _logDay(s),
-            )),
-          ],
+          const SizedBox(height: 16),
 
-          const SizedBox(height: 40),
+          _WeekActivitySection(
+            streaks: _streaks,
+            period: _selectedPeriod,
+            dailyCounts: dailyCounts,
+          ),
+
+          const SizedBox(height: 20),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Text('Your Streaks',
+                style: TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w700, color: t.txt)),
+          ),
+          if (_streaks.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
+                decoration: BoxDecoration(
+                  color: t.bg2,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: t.border),
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 52, height: 52,
+                      decoration: BoxDecoration(
+                        color: AppTokens.coral.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.local_fire_department_outlined,
+                          color: AppTokens.coral, size: 26),
+                    ),
+                    const SizedBox(height: 14),
+                    Text('No streaks yet', style: t.heading(size: 18)),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Tap "Add" to create your first streak.',
+                      textAlign: TextAlign.center,
+                      style: t.body(size: 13),
+                    ),
+                    const SizedBox(height: 20),
+                    _PrimaryBtn(label: 'Add your first streak', onTap: _openAdd),
+                  ],
+                ),
+              ),
+            )
+          else
+            for (final s in _streaks)
+              _TappableStreakCard(
+                key: ValueKey(s.hashCode),
+                streak: s,
+                onTap: () => _openDetail(s),
+                onLogDay: s.loggedToday ? null : () => _logDay(s),
+                onLongPress: () => _showContextMenu(context, s),
+              ),
+
+          const SizedBox(height: 60),
         ],
       ),
     );
@@ -1815,6 +1910,941 @@ class _PrimaryBtnState extends State<_PrimaryBtn> {
           ),
         ),
       );
+  }
+}
+
+// ─── New Date Strip ───────────────────────────────────────────────────────────
+class _NewDateStrip extends StatelessWidget {
+  const _NewDateStrip();
+
+  static const _dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  static const _months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final now = DateTime.now();
+    // Show today ±3 days (7 total)
+    final days = List.generate(7, (i) => now.add(Duration(days: i - 3)));
+
+    return SizedBox(
+      height: 52,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: 7,
+        itemBuilder: (_, i) {
+          final d = days[i];
+          final isToday = i == 3;
+          if (isToday) {
+            return Container(
+              margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: t.bg2,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: t.border),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                'Today, ${d.day} ${_months[d.month - 1]}',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: t.txt),
+              ),
+            );
+          }
+          return Container(
+            width: 40,
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            alignment: Alignment.center,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('${d.day}',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700,
+                        color: t.txt.withOpacity(0.45))),
+                Text(_dayNames[d.weekday - 1].substring(0, 2),
+                    style: TextStyle(fontSize: 9, color: t.txt3)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Streak Rate Card (left) ──────────────────────────────────────────────────
+class _StreakRateCard extends StatelessWidget {
+  final List<int> dailyCounts;
+  final String multiplier;
+  final int totalXp;
+
+  const _StreakRateCard({
+    required this.dailyCounts,
+    required this.multiplier,
+    required this.totalXp,
+  });
+
+  bool get _hasData => dailyCounts.any((c) => c > 0);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: t.bg2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: t.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: AppTokens.coral.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.local_fire_department_rounded,
+                    size: 15, color: AppTokens.coral),
+              ),
+              const SizedBox(width: 8),
+              Text('Streak Rate',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: t.txt)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 56,
+            child: _hasData
+                ? CustomPaint(
+                    painter: _LineChartPainter(counts: dailyCounts, color: AppTokens.coral),
+                    size: const Size(double.infinity, 56),
+                  )
+                : Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.show_chart_rounded, size: 22, color: t.txt3.withOpacity(0.4)),
+                        const SizedBox(height: 4),
+                        Text('Log streaks to see your rate',
+                            style: TextStyle(fontSize: 9, color: t.txt3)),
+                      ],
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              _Legend(color: const Color(0xFF4DA6FF), label: '${multiplier}x Multiplier'),
+              const SizedBox(width: 12),
+              _Legend(color: AppTokens.purple, label: '$totalXp XP'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Legend extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _Legend({required this.color, required this.label});
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(width: 7, height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      const SizedBox(width: 4),
+      Text(label, style: TextStyle(fontSize: 10, color: t.txt2)),
+    ]);
+  }
+}
+
+class _LineChartPainter extends CustomPainter {
+  final List<int> counts;
+  final Color color;
+  const _LineChartPainter({required this.counts, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (counts.isEmpty) return;
+    final maxVal = counts.reduce((a, b) => a > b ? a : b).toDouble();
+    final effectiveMax = maxVal == 0 ? 1.0 : maxVal;
+
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [color.withOpacity(0.3), color.withOpacity(0.0)],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..style = PaintingStyle.fill;
+
+    final n = counts.length;
+    List<Offset> pts = List.generate(n, (i) {
+      final x = i / (n - 1) * size.width;
+      final y = size.height - (counts[i] / effectiveMax) * size.height * 0.85;
+      return Offset(x, y);
+    });
+
+    // Bezier curve
+    final path = Path()..moveTo(pts.first.dx, pts.first.dy);
+    for (int i = 0; i < pts.length - 1; i++) {
+      final cpx = (pts[i].dx + pts[i + 1].dx) / 2;
+      path.cubicTo(cpx, pts[i].dy, cpx, pts[i + 1].dy, pts[i + 1].dx, pts[i + 1].dy);
+    }
+    canvas.drawPath(path, paint);
+
+    // Fill
+    final fillPath = Path()..addPath(path, Offset.zero)
+      ..lineTo(pts.last.dx, size.height)
+      ..lineTo(pts.first.dx, size.height)
+      ..close();
+    canvas.drawPath(fillPath, fillPaint);
+
+    // Dot on last point
+    canvas.drawCircle(pts.last, 4, Paint()..color = color);
+    canvas.drawCircle(pts.last, 2.5, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(_LineChartPainter old) => old.counts != counts;
+}
+
+// ─── Strength Card (right) ────────────────────────────────────────────────────
+class _StrengthCard extends StatelessWidget {
+  final double strength;
+  final VoidCallback onAdd;
+  const _StrengthCard({required this.strength, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final pct = (strength * 100).round();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 16, 14, 14),
+      decoration: BoxDecoration(
+        color: t.bg2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: t.border),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              SizedBox(
+                width: 76, height: 76,
+                child: CustomPaint(
+                  painter: _ArcPainter(value: strength, color: AppTokens.purple, bg: t.bg3),
+                ),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('$pct%',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: t.txt,
+                          letterSpacing: -0.5)),
+                  Text('Strength',
+                      style: TextStyle(fontSize: 9, color: t.txt3, letterSpacing: 0.2)),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          GestureDetector(
+            onTap: onAdd,
+            child: Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: AppTokens.coral.withOpacity(0.1),
+                shape: BoxShape.circle,
+                border: Border.all(color: AppTokens.coral.withOpacity(0.25)),
+              ),
+              child: Icon(Icons.emoji_events_rounded, size: 20, color: AppTokens.coral),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text('Weekly\nstrength', textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 9, color: t.txt3, height: 1.4)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArcPainter extends CustomPainter {
+  final double value;
+  final Color color, bg;
+  const _ArcPainter({required this.value, required this.color, required this.bg});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Rect.fromLTWH(6, 6, size.width - 12, size.height - 12);
+    const startAngle = -math.pi * 0.8;
+    const sweepAll = math.pi * 1.6;
+
+    canvas.drawArc(rect, startAngle, sweepAll, false,
+        Paint()..color = bg..strokeWidth = 7..style = PaintingStyle.stroke
+            ..strokeCap = StrokeCap.round);
+
+    if (value > 0) {
+      canvas.drawArc(rect, startAngle, sweepAll * value.clamp(0, 1), false,
+          Paint()..color = color..strokeWidth = 7..style = PaintingStyle.stroke
+              ..strokeCap = StrokeCap.round);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ArcPainter old) => old.value != value;
+}
+
+// ─── Period Tab Bar ───────────────────────────────────────────────────────────
+class _PeriodTabBar extends StatelessWidget {
+  final String selected;
+  final void Function(String) onSelect;
+  static const _tabs = ['Week', 'Month', 'Year', 'All time'];
+
+  const _PeriodTabBar({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(color: t.bg2, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: t.border)),
+        padding: const EdgeInsets.all(4),
+        child: Row(
+          children: _tabs.map((tab) {
+            final isActive = tab == selected;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => onSelect(tab),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isActive ? t.accent : Colors.transparent,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text(
+                    tab,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                      color: isActive ? t.bg : t.txt2,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Week Activity Section ────────────────────────────────────────────────────
+class _WeekActivitySection extends StatelessWidget {
+  final List<Streak> streaks;
+  final String period;
+  final List<int> dailyCounts;
+
+  const _WeekActivitySection({
+    required this.streaks,
+    required this.period,
+    required this.dailyCounts,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final now = DateTime.now();
+
+    // Build bar data for the selected period
+    final List<(String label, int count, bool isToday)> bars;
+    if (period == 'Week') {
+      bars = List.generate(7, (i) {
+        final d = now.subtract(Duration(days: 6 - i));
+        final label = ['M','T','W','T','F','S','S'][d.weekday - 1];
+        return (label, dailyCounts[i], i == 6);
+      });
+    } else if (period == 'Month') {
+      // Last 4 weeks as weekly buckets
+      bars = List.generate(4, (w) {
+        final weekStart = now.subtract(Duration(days: (3 - w) * 7 + now.weekday - 1));
+        int count = 0;
+        for (int d = 0; d < 7; d++) {
+          final date = weekStart.add(Duration(days: d));
+          final isToday2 = date.year == now.year && date.month == now.month && date.day == now.day;
+          count += streaks.where((s) =>
+            (isToday2 && s.loggedToday) ||
+            s.completionHistory.any((c) =>
+                c.year == date.year && c.month == date.month && c.day == date.day)
+          ).length;
+        }
+        return ('W${w + 1}', count, w == 3);
+      });
+    } else {
+      // Year: last 12 months
+      bars = List.generate(12, (i) {
+        final month = DateTime(now.year, now.month - 11 + i, 1);
+        int count = streaks.fold(0, (sum, s) =>
+          sum + s.completionHistory.where((c) =>
+              c.year == month.year && c.month == month.month).length);
+        const abbr = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+        return (abbr[month.month - 1], count, month.month == now.month && month.year == now.year);
+      });
+    }
+
+    final maxCount = bars.map((b) => b.$2).reduce((a, b) => a > b ? a : b);
+    final effectiveMax = maxCount == 0 ? 1 : maxCount;
+
+    // Last-period label
+    final lastLabel = period == 'Week' ? 'last week' : period == 'Month' ? 'last month' : 'last year';
+    final lastCount = period == 'Week'
+        ? List.generate(7, (i) {
+            final d = now.subtract(Duration(days: 13 - i));
+            final date = DateTime(d.year, d.month, d.day);
+            return streaks.where((s) => s.completionHistory.any((c) =>
+                c.year == date.year && c.month == date.month && c.day == date.day)).length;
+          }).fold(0, (a, b) => a + b)
+        : 0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(color: t.bg2, borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: t.border)),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('This ${period.toLowerCase()}',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.txt)),
+                ),
+                if (period == 'Week' && lastCount > 0) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: t.bg3, borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: t.border)),
+                    child: Text('$lastLabel: $lastCount',
+                        style: TextStyle(fontSize: 11, color: t.txt2)),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (streaks.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: AppTokens.purple.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: AppTokens.purple.withOpacity(0.25))),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(width: 6, height: 6,
+                          decoration: const BoxDecoration(
+                              color: AppTokens.purple, shape: BoxShape.circle)),
+                      const SizedBox(width: 5),
+                      Text('Best Activity',
+                          style: TextStyle(fontSize: 11, color: AppTokens.purple,
+                              fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              height: 90,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: bars.map((b) {
+                  final frac = b.$2 / effectiveMax;
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                if (frac > 0)
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 400),
+                                    curve: Curves.easeOut,
+                                    height: 74 * frac,
+                                    decoration: BoxDecoration(
+                                      color: b.$3 ? AppTokens.purple : AppTokens.coral.withOpacity(0.75),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                  )
+                                else
+                                  Container(
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: t.bg3,
+                                      borderRadius: BorderRadius.circular(3),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(b.$1,
+                              style: TextStyle(fontSize: 10,
+                                  color: b.$3 ? AppTokens.purple : t.txt3)),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Tappable Streak Card ─────────────────────────────────────────────────────
+class _TappableStreakCard extends StatelessWidget {
+  final Streak streak;
+  final VoidCallback onTap;
+  final VoidCallback? onLogDay;
+  final VoidCallback onLongPress;
+
+  const _TappableStreakCard({
+    super.key,
+    required this.streak,
+    required this.onTap,
+    required this.onLogDay,
+    required this.onLongPress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final s = streak;
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: t.bg2,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                color: s.color.withOpacity(0.13),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(s.icon, color: s.color, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.title,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.txt)),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.local_fire_department_rounded, size: 11, color: AppTokens.coral),
+                    const SizedBox(width: 3),
+                    Text('${s.currentStreak} day streak',
+                        style: TextStyle(fontSize: 11, color: t.txt2)),
+                    if (s.frozenThisWeek) ...[
+                      const SizedBox(width: 8),
+                      const Text('❄️', style: TextStyle(fontSize: 10)),
+                    ],
+                  ]),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                GestureDetector(
+                  onTap: onLogDay,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: s.loggedToday ? t.bg3 : s.color.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: s.loggedToday ? t.border : s.color.withOpacity(0.35)),
+                    ),
+                    child: Text(
+                      s.loggedToday ? '✓ Done' : '+ Log',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: s.loggedToday ? t.txt3 : s.color,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Icon(Icons.chevron_right, size: 16, color: t.txt3),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Streak Detail Screen ─────────────────────────────────────────────────────
+class _StreakDetailScreen extends StatefulWidget {
+  final Streak streak;
+  final VoidCallback? onLogDay;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _StreakDetailScreen({
+    required this.streak,
+    required this.onLogDay,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  State<_StreakDetailScreen> createState() => _StreakDetailScreenState();
+}
+
+class _StreakDetailScreenState extends State<_StreakDetailScreen> {
+  late DateTime _calendarMonth;
+
+  @override
+  void initState() {
+    super.initState();
+    _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  }
+
+  int get _skips {
+    final s = widget.streak;
+    if (s.completionHistory.isEmpty) return 0;
+    final first = s.completionHistory.reduce((a, b) => a.isBefore(b) ? a : b);
+    final days = DateTime.now().difference(first).inDays + 1;
+    return (days - s.totalCompletions).clamp(0, days);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final s = widget.streak;
+    final months = ['January','February','March','April','May','June',
+        'July','August','September','October','November','December'];
+
+    return Scaffold(
+      backgroundColor: t.bg,
+      appBar: AppBar(
+        backgroundColor: t.bg,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: t.txt),
+          onPressed: () => Navigator.pop(context),
+        ),
+        centerTitle: true,
+        title: Text(s.title,
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: t.txt)),
+        actions: [
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert_rounded, color: t.txt),
+            color: t.bg2,
+            onSelected: (v) {
+              if (v == 'edit') { Navigator.pop(context); widget.onEdit(); }
+              if (v == 'delete') { Navigator.pop(context); widget.onDelete(); }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'edit',
+                  child: Text('Edit', style: TextStyle(color: t.txt))),
+              PopupMenuItem(value: 'delete',
+                  child: Text('Delete', style: TextStyle(color: AppTokens.coral))),
+            ],
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+        child: Column(
+          children: [
+            // Icon
+            Container(
+              width: 72, height: 72,
+              decoration: BoxDecoration(
+                color: s.color.withOpacity(0.13),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(s.icon, color: s.color, size: 34),
+            ),
+            const SizedBox(height: 16),
+            Text('Current Streak',
+                style: TextStyle(fontSize: 13, color: t.txt2, letterSpacing: 0.3)),
+            const SizedBox(height: 16),
+
+            // Big streak circle
+            Container(
+              width: 160, height: 160,
+              decoration: BoxDecoration(
+                color: t.bg2,
+                shape: BoxShape.circle,
+                border: Border.all(color: t.border, width: 1),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.local_fire_department_rounded,
+                      size: 28, color: AppTokens.coral),
+                  const SizedBox(height: 4),
+                  Text('${s.currentStreak}',
+                      style: TextStyle(
+                          fontSize: 52, fontWeight: FontWeight.w800, color: t.txt,
+                          letterSpacing: -2, height: 1)),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // Stats row
+            Container(
+              decoration: BoxDecoration(color: t.bg2, borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: t.border)),
+              child: IntrinsicHeight(
+                child: Row(
+                  children: [
+                    _DetailStat(label: 'TOTAL', value: '${s.totalCompletions}', t: t),
+                    VerticalDivider(width: 1, color: t.border),
+                    _DetailStat(label: 'BEST', value: '${s.longestStreak}', t: t),
+                    VerticalDivider(width: 1, color: t.border),
+                    _DetailStat(label: 'SKIPS', value: '$_skips', t: t),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
+            // Activity calendar
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Activity',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: t.txt)),
+                Row(children: [
+                  GestureDetector(
+                    onTap: () => setState(() =>
+                        _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
+                    child: Icon(Icons.chevron_left, color: t.txt3, size: 20),
+                  ),
+                  Text('${months[_calendarMonth.month - 1]} ${_calendarMonth.year}',
+                      style: TextStyle(fontSize: 12, color: t.txt2, fontWeight: FontWeight.w500)),
+                  GestureDetector(
+                    onTap: () => setState(() =>
+                        _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
+                    child: Icon(Icons.chevron_right, color: t.txt3, size: 20),
+                  ),
+                ]),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            _ActivityCalendar(streak: s, month: _calendarMonth),
+
+            const SizedBox(height: 24),
+
+            // Log Today button
+            if (widget.onLogDay != null)
+              GestureDetector(
+                onTap: () { widget.onLogDay!(); setState(() {}); },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: s.color,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Text('+ Log Today',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700,
+                          color: Colors.black)),
+                ),
+              )
+            else
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: t.bg3,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text('✓ Logged Today',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: t.txt3)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailStat extends StatelessWidget {
+  final String label, value;
+  final AppTokens t;
+  const _DetailStat({required this.label, required this.value, required this.t});
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Column(children: [
+        Text(value,
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: t.txt)),
+        const SizedBox(height: 4),
+        Text(label, style: TextStyle(fontSize: 10, color: t.txt3, letterSpacing: 0.8)),
+      ]),
+    ),
+  );
+}
+
+// ─── Activity Calendar ────────────────────────────────────────────────────────
+class _ActivityCalendar extends StatelessWidget {
+  final Streak streak;
+  final DateTime month;
+  const _ActivityCalendar({required this.streak, required this.month});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppTokens.of(context);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final firstDay = DateTime(month.year, month.month, 1);
+    final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+    // Offset so week starts Mon (weekday 1)
+    final startOffset = (firstDay.weekday - 1) % 7;
+    final totalCells = startOffset + daysInMonth;
+    final rows = (totalCells / 7).ceil();
+
+    const headers = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: t.bg2, borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.border)),
+      child: Column(
+        children: [
+          // Day headers
+          Row(
+            children: headers.map((h) => Expanded(
+              child: Text(h, textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: t.txt3)),
+            )).toList(),
+          ),
+          const SizedBox(height: 8),
+          for (int row = 0; row < rows; row++) ...[
+            Row(
+              children: List.generate(7, (col) {
+                final cell = row * 7 + col;
+                final day = cell - startOffset + 1;
+                if (day < 1 || day > daysInMonth) {
+                  return const Expanded(child: SizedBox(height: 34));
+                }
+                final date = DateTime(month.year, month.month, day);
+                final isToday = date == today;
+                final isLogged = streak.loggedToday && isToday
+                    ? true
+                    : streak.completionHistory.any((c) =>
+                        c.year == date.year && c.month == date.month && c.day == date.day);
+                final isFuture = date.isAfter(today);
+
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: AspectRatio(
+                      aspectRatio: 1,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: isLogged
+                                  ? streak.color.withOpacity(0.85)
+                                  : isFuture
+                                      ? Colors.transparent
+                                      : t.bg3,
+                              shape: BoxShape.circle,
+                              border: isToday
+                                  ? Border.all(color: streak.color, width: 2)
+                                  : null,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '$day',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isLogged
+                                      ? Colors.white
+                                      : isFuture
+                                          ? t.txt3.withOpacity(0.3)
+                                          : t.txt2,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (isToday && !isLogged)
+                            Positioned(
+                              bottom: 2,
+                              child: Container(
+                                width: 4, height: 4,
+                                decoration: BoxDecoration(
+                                    color: streak.color, shape: BoxShape.circle),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+            if (row < rows - 1) const SizedBox(height: 2),
+          ],
+        ],
+      ),
+    );
   }
 }
 

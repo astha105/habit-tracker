@@ -125,6 +125,75 @@ class NotificationService {
     print('✓ Daily reminder scheduled at $hour:${minute.toString().padLeft(2, '0')}');
   }
 
+  // ── Water reminders ────────────────────────────────────────────────────────
+  // IDs 8000–8023 are reserved for water reminders (one per hour slot).
+
+  static const _waterMessages = [
+    'Time to hydrate! 💧 Drink a glass of water.',
+    'Your body is ~60% water — top it up! 💧',
+    'Sip sip! Stay hydrated and keep going 💧',
+    'Water check! 💧 How are you doing on your goal?',
+    'Feeling tired? Drink some water first! 💧',
+    'Quick reminder: grab a glass of water 💧',
+  ];
+
+  /// Schedule repeating water-drink reminders between [startHour] and [endHour]
+  /// every [intervalHours] hours. Cancels any existing water reminders first.
+  static Future<void> scheduleWaterReminders({
+    required int startHour,
+    required int endHour,
+    required int intervalHours,
+  }) async {
+    if (!_initialized) await init();
+    await cancelWaterReminders();
+
+    int slot = 0;
+    for (int hour = startHour; hour <= endHour; hour += intervalHours) {
+      final id = 8000 + slot;
+      final msg = _waterMessages[slot % _waterMessages.length];
+
+      final now = tz.TZDateTime.now(tz.local);
+      var scheduled = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, 0);
+      if (scheduled.isBefore(now)) {
+        scheduled = scheduled.add(const Duration(days: 1));
+      }
+
+      await _plugin.zonedSchedule(
+        id,
+        'Drink water! 💧',
+        msg,
+        scheduled,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'water_reminders',
+            'Water Reminders',
+            channelDescription: 'Reminders to drink water throughout the day',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: false,
+            presentSound: true,
+          ),
+        ),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+      print('✓ Water reminder at $hour:00 (id $id)');
+      slot++;
+    }
+  }
+
+  static Future<void> cancelWaterReminders() async {
+    for (int i = 0; i < 24; i++) {
+      await _plugin.cancel(8000 + i);
+    }
+    print('✓ Cancelled water reminders');
+  }
+
   /// Reschedule all reminders based on current goals list.
   /// Call this after any goals save.
   static Future<void> rescheduleAll(List<dynamic> goals) async {

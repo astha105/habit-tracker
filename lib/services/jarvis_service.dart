@@ -5,46 +5,32 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
-/// Talks to the local Python Jarvis backend (jarvis_server/main.py).
-///
-/// Change [baseUrl] to your server's address when testing on a real device.
-/// For iOS/Android emulators pointing at the host machine use 10.0.2.2:8000.
+/// Jarvis AI coach — powered by Groq via the FastAPI server.
+/// Deploy the server (jarvis_server/) to Railway/Render and update [baseUrl].
 abstract final class JarvisService {
   // ── Config ──────────────────────────────────────────────────────────────────
-  /// http://10.0.2.2:8000  on Android emulator
-  /// http://localhost:8000  on iOS simulator / desktop
-  static const String baseUrl = 'http://localhost:8000';
+  /// Update this after deploying: https://your-app.up.railway.app
+  static const String baseUrl = String.fromEnvironment(
+    'JARVIS_URL',
+    defaultValue: 'https://habit-tracker-ecuo.onrender.com',
+  );
 
-  // ── Chat (streaming SSE) ────────────────────────────────────────────────────
-
-  /// Streams text chunks from Jarvis as they arrive from the server.
-  ///
-  /// [messages] — full conversation history, each entry is
-  ///   `{'role': 'user'|'assistant', 'content': '...'}`.
-  ///
-  /// [habitContext] — optional plain-text summary of the user's habits;
-  ///   the server appends it to the system prompt automatically.
+  // ── Chat (streaming SSE via server → Groq) ──────────────────────────────────
   static Stream<String> chatStream({
     required List<Map<String, String>> messages,
     String habitContext = '',
   }) async* {
     final uri = Uri.parse('$baseUrl/chat');
-
-    final body = jsonEncode({
-      'messages': messages,
-      'habit_context': habitContext,
-    });
-
     final request = http.Request('POST', uri)
       ..headers['Content-Type'] = 'application/json'
-      ..body = body;
+      ..body = jsonEncode({'messages': messages, 'habit_context': habitContext});
 
     http.StreamedResponse response;
     try {
       response = await http.Client().send(request);
     } catch (e) {
       print('⚠️ JarvisService: cannot reach server — $e');
-      yield* Stream.error('Cannot reach Jarvis server. Make sure it is running.');
+      yield* Stream.error('Cannot reach Jarvis server.');
       return;
     }
 
@@ -66,14 +52,12 @@ abstract final class JarvisService {
       try {
         final json = jsonDecode(payload) as Map<String, dynamic>;
         if (json.containsKey('error')) {
-          print('⚠️ JarvisService stream error: ${json['error']}');
+          print('⚠️ JarvisService: ${json['error']}');
           break;
         }
         final text = json['text'] as String?;
         if (text != null && text.isNotEmpty) yield text;
-      } catch (_) {
-        // skip malformed chunks
-      }
+      } catch (_) {}
     }
   }
 
@@ -89,7 +73,7 @@ abstract final class JarvisService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'text': text}),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 45));
 
       if (response.statusCode == 200) return response.bodyBytes;
       print('⚠️ JarvisService TTS: HTTP ${response.statusCode}');
@@ -136,7 +120,7 @@ abstract final class JarvisService {
     try {
       final response = await http
           .get(Uri.parse('$baseUrl/health'))
-          .timeout(const Duration(seconds: 4));
+          .timeout(const Duration(seconds: 30));
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       }

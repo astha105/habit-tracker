@@ -7,10 +7,10 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:habit_tracker/config/app_config.dart';
 import 'package:habit_tracker/theme/app_colors.dart';
-import 'package:habit_tracker/screens/landing_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key});
+  final VoidCallback? onComplete;
+  const OnboardingScreen({super.key, this.onComplete});
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -127,9 +127,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     final key = '${AppConfig.keyOnboardingComplete}_$uid';
     await prefs.setBool(key, true);
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => LandingScreen()),
-    );
+    widget.onComplete?.call();
   }
 
   @override

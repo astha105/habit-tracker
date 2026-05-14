@@ -101,11 +101,16 @@ abstract final class CloudFunctionsService {
   ///
   /// Returns the assistant reply string, or null on error.
   static Future<String?> chatWithCoach(
-      List<Map<String, String>> messages) async {
+    List<Map<String, String>> messages, {
+    String habitContext = '',
+  }) async {
     try {
       final result = await _functions
           .httpsCallable('chatWithCoach')
-          .call<Map<String, dynamic>>({'messages': messages});
+          .call<Map<String, dynamic>>({
+        'messages': messages,
+        'habitContext': habitContext,
+      });
       return result.data['reply'] as String?;
     } catch (e) {
       print('⚠️ chatWithCoach failed: $e');

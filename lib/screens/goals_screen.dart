@@ -637,24 +637,14 @@ class _GoalsScreenState extends State<GoalsScreen> {
 
           if (active.isNotEmpty) ...[
             _SectionHeader(label: 'In Progress', accent: AppTokens.purple),
-            if (active.isNotEmpty)
-              AppTokensopGoalCard(
-                goal: active.first,
-                onEdit: () => _openEdit(active.first),
-                onDelete: () => _confirmDelete(active.first),
-                onLongPress: () => _showContextMenu(context, active.first),
-                onLogDay: active.first.dailyTargetMet ? null : () => _logDay(active.first),
-              ),
-            if (active.length > 1) ...[
-              ...active.skip(1).map((g) => _SwipeCard(
-                key: ValueKey(g.hashCode),
-                goal: g,
-                onEdit: () => _openEdit(g),
-                onDelete: () => _confirmDelete(g),
-                onLongPress: () => _showContextMenu(context, g),
-                onLogDay: g.dailyTargetMet ? null : () => _logDay(g),
-              )),
-            ],
+            ...active.map((g) => _SwipeCard(
+              key: ValueKey(g.hashCode),
+              goal: g,
+              onEdit: () => _openEdit(g),
+              onDelete: () => _confirmDelete(g),
+              onLongPress: () => _showContextMenu(context, g),
+              onLogDay: g.dailyTargetMet ? null : () => _logDay(g),
+            )),
           ],
 
           if (completed.isNotEmpty) ...[
@@ -808,7 +798,7 @@ class _SwipeCard extends StatelessWidget {
       },
       child: GestureDetector(
         onLongPress: onLongPress,
-        child: _GoalCard(goal: goal, onLogDay: onLogDay),
+        child: _GoalCard(goal: goal, onLogDay: onLogDay, onEdit: onEdit, onDelete: onDelete),
       ),
     );
   }
@@ -1087,7 +1077,9 @@ class _IconActionBtn extends StatelessWidget {
 class _GoalCard extends StatefulWidget {
   final Goal goal;
   final VoidCallback? onLogDay;
-  const _GoalCard({required this.goal, required this.onLogDay});
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  const _GoalCard({required this.goal, required this.onLogDay, this.onEdit, this.onDelete});
 
   @override
   State<_GoalCard> createState() => _GoalCardState();
@@ -1095,6 +1087,8 @@ class _GoalCard extends StatefulWidget {
 
 class _GoalCardState extends State<_GoalCard> {
   bool _hovered = false;
+
+  bool get _highlighted => _hovered;
 
   @override
   Widget build(BuildContext context) {
@@ -1116,13 +1110,29 @@ class _GoalCardState extends State<_GoalCard> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        decoration: BoxDecoration(
-          color: _hovered ? t.bg3 : t.bg2,
-          borderRadius: BorderRadius.circular(AppTokens.r12),
-          border: Border.all(color: _hovered ? goal.color.withOpacity(0.4) : t.border),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _hovered = true),
+        onTapUp: (_) => setState(() => _hovered = false),
+        onTapCancel: () => setState(() => _hovered = false),
+        child: AnimatedScale(
+          scale: _highlighted ? 1.025 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            gradient: _highlighted
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [goal.color.withOpacity(0.18), t.bg2],
+                  )
+                : null,
+            color: _highlighted ? null : t.bg2,
+            borderRadius: BorderRadius.circular(AppTokens.r12),
+          border: Border.all(color: _highlighted ? goal.color.withOpacity(0.4) : t.border),
         ),
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -1132,13 +1142,13 @@ class _GoalCardState extends State<_GoalCard> {
               duration: const Duration(milliseconds: 180),
               width: 40, height: 40,
               decoration: BoxDecoration(
-                color: _hovered ? goal.color : goal.color.withOpacity(0.12),
+                color: _highlighted ? goal.color : goal.color.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(AppTokens.r8),
               ),
               child: goal.useEmoji
                   ? Center(child: Text(goal.selectedEmoji, style: const TextStyle(fontSize: 20)))
                   : Icon(goal.icon,
-                      color: _hovered ? Colors.white : goal.color, size: 20),
+                      color: _highlighted ? Colors.white : goal.color, size: 20),
             ),
             const SizedBox(width: AppTokens.s12),
             Expanded(
@@ -1166,6 +1176,14 @@ class _GoalCardState extends State<_GoalCard> {
                             fontWeight: FontWeight.w700,
                             color: goal.color,
                             letterSpacing: -0.2)),
+                    if (widget.onEdit != null) ...[
+                      const SizedBox(width: 6),
+                      _IconActionBtn(icon: Icons.edit_outlined, onTap: widget.onEdit!),
+                    ],
+                    if (widget.onDelete != null) ...[
+                      const SizedBox(width: 4),
+                      _IconActionBtn(icon: Icons.delete_outline, onTap: widget.onDelete!),
+                    ],
                   ]),
                   const SizedBox(height: 3),
                   Text(goal.description, style: t.body(size: 12)),
@@ -1233,6 +1251,8 @@ class _GoalCardState extends State<_GoalCard> {
               ),
             ),
           ],
+        ),
+          ),
         ),
       ),
     );
